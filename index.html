@@ -172,6 +172,7 @@
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
 </head>
 <body>
 
@@ -204,8 +205,17 @@
   </div>
 </div>
 
+<!-- Lobby overlay -->
+<div id="lobbyOverlay" class="overlay" style="display:grid;">
+  <div class="panel">
+    <div class="title">F1 Snake</div>
+    <div class="subtitle">Sign in to save your progress.</div>
+    <button id="googleBtn" class="btn">Sign in with Google</button>
+  </div>
+</div>
+
 <!-- Start overlay -->
-<div id="startOverlay" class="overlay" style="display:grid;">
+<div id="startOverlay" class="overlay" style="display:none;">
   <div class="panel">
     <div class="title">F1 Snake</div>
     <div class="subtitle">Collect fuel cells anywhere in the arena. Avoid barriers. Boost wisely!</div>
@@ -261,8 +271,10 @@
   const db = firebase.firestore();
 
   /* ========= DOM ========= */
+  const lobbyOverlay = document.getElementById('lobbyOverlay');
   const startOverlay = document.getElementById('startOverlay');
   const restartOverlay = document.getElementById('restartOverlay');
+  const googleBtn = document.getElementById('googleBtn');
   const nameInput = document.getElementById('nameInput');
   const startBtn = document.getElementById('startBtn');
   const restartNameInput = document.getElementById('restartNameInput');
@@ -293,12 +305,39 @@
   const xpTime = document.getElementById('xpTime');
 
   /* ========= State ========= */
+  let authUser = null;
+  let playerId = null;
   let playerName = localStorage.getItem('f1snake_name') || '';
   if (playerName) { nameInput.value = playerName; }
   let alive = false;
   let score = 0;
   let gameStartMs = 0;
   let spawnGraceUntil = 0;
+
+  firebase.auth().onAuthStateChanged(user => {
+    if (user){
+      authUser = user;
+      playerId = user.uid;
+      playerName = localStorage.getItem('f1snake_name') || user.displayName || '';
+      nameInput.value = playerName;
+      lobbyOverlay.style.display = 'none';
+      startOverlay.style.display = 'grid';
+    } else {
+      authUser = null;
+      playerId = null;
+      startOverlay.style.display = 'none';
+      lobbyOverlay.style.display = 'grid';
+    }
+  });
+
+  googleBtn.addEventListener('click', async () => {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    try{
+      await firebase.auth().signInWithPopup(provider);
+    }catch(e){
+      console.error('Google sign-in failed', e);
+    }
+  });
 
   // Rank snapshot for RR delta calculation
   let prevRankIndex = 0;
@@ -327,9 +366,6 @@
     const groups = ['Iron','Bronze','Silver','Gold','Platinum','Diamond','Ascendant','Immortal'];
     return groups[Math.floor(idx/3)] || 'Radiant';
   }
-  function sanitizeId(name){
-    return (name||'player').trim().toLowerCase().replace(/[^a-z0-9_-]/g,'_');
-  }
   function rankColor(idx){
     const g = rankGroup(idx);
     switch(g){
@@ -345,6 +381,7 @@
       default: return '#999';
     }
   }
+  let currentRankColor = rankColor(0);
   function rankBadgeDataURI(idx, big=false){
     const col = rankColor(idx);
     const size = big?120:18;
@@ -363,12 +400,11 @@
 </svg>`;
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
   }
-  async function getOrCreatePlayerRank(name){
-    const id = sanitizeId(name);
-    const ref = db.collection('players').doc(id);
+  async function getOrCreatePlayerRank(uid, name){
+    const ref = db.collection('players').doc(uid);
     const snap = await ref.get();
     if (!snap.exists){
-      const data = { name, rankIndex: 0, rr: 0, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+      const data = { uid, name, rankIndex: 0, rr: 0, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
       await ref.set(data);
       return data;
     }
@@ -395,12 +431,12 @@
     rankNowIcon.src = rankBadgeDataURI(idx);
     rankText.textContent = `Rank: ${RANKS[idx] || 'Unrated'}`;
     rrText.textContent = `RR: ${Math.max(0, Math.min(100, Math.round(rrVal ?? 0)))}`;
+    setCarColor(rankColor(idx));
   }
 
-  async function applyMatchResultAndSave(name, scoreVal, elapsedMs){
-    const id = sanitizeId(name);
-    const ref = db.collection('players').doc(id);
-    const data = await getOrCreatePlayerRank(name);
+  async function applyMatchResultAndSave(uid, name, scoreVal, elapsedMs){
+    const ref = db.collection('players').doc(uid);
+    const data = await getOrCreatePlayerRank(uid, name);
 
     let idx = data.rankIndex || 0;
     let rr = data.rr || 0;
@@ -418,28 +454,27 @@
     if (idx === 0 && rr < 0) rr = 0;
     if (idx === RADIANT_INDEX && rr > 100) rr = 100;
 
-    const newData = { name, rankIndex: idx, rr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    const newData = { uid, name, rankIndex: idx, rr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
     await ref.set(newData, {merge:true});
     return { ...newData, delta, promos, deranks };
   }
 
-  // Prevent future duplicates: write one doc per user (id = sanitized name) and keep highest score
-  async function upsertHighScore(name, scoreVal, rankIndex){
-    const id = sanitizeId(name);
-    const ref = db.collection('leaderboard').doc(id);
+  // Prevent future duplicates: write one doc per user (id = uid) and keep highest score
+  async function upsertHighScore(uid, name, scoreVal, rankIndex){
+    const ref = db.collection('leaderboard').doc(uid);
     try{
       await db.runTransaction(async (tx)=>{
         const snap = await tx.get(ref);
         if (!snap.exists){
           tx.set(ref, {
-            name, score: scoreVal, rankIndex: rankIndex ?? 0,
+            uid, name, score: scoreVal, rankIndex: rankIndex ?? 0,
             timestamp: firebase.firestore.FieldValue.serverTimestamp()
           });
         } else {
           const cur = snap.data();
           if ((cur.score||0) < scoreVal){
             tx.set(ref, {
-              name, score: scoreVal, rankIndex: rankIndex ?? (cur.rankIndex||0),
+              uid, name, score: scoreVal, rankIndex: rankIndex ?? (cur.rankIndex||0),
               timestamp: firebase.firestore.FieldValue.serverTimestamp()
             }, {merge:true});
           } else if (typeof rankIndex === 'number' && (cur.rankIndex||0)!==rankIndex){
@@ -450,42 +485,26 @@
     }catch(e){ console.error('upsertHighScore failed', e); }
   }
 
-  /* ========= Leaderboard (de-duplicate existing) ========= */
+  /* ========= Leaderboard ========= */
   function startLeaderboardListener(){
-    db.collection('leaderboard').orderBy('score','desc').limit(100).onSnapshot(async snap=>{
-      // Client-side collapse by name to handle old duplicate entries
-      const byName = new Map();
-      snap.forEach(doc=>{
-        const d = doc.data();
-        const key = sanitizeId(d.name||'Player');
-        const existing = byName.get(key);
-        if (!existing || (d.score||0) > existing.score){
-          byName.set(key, {name: d.name||'Player', score: d.score||0, rankIndex: (typeof d.rankIndex==='number')? d.rankIndex : null});
-        }
-      });
-
-      // Fetch missing rankIndex from players
-      const items = Array.from(byName.values());
+    db.collection('leaderboard').orderBy('score','desc').limit(10).onSnapshot(async snap=>{
+      const items = [];
+      snap.forEach(doc=> items.push({id: doc.id, ...doc.data()}));
       for (let it of items){
-        if (it.rankIndex === null){
-          const ps = await db.collection('players').doc(sanitizeId(it.name)).get();
+        if (typeof it.rankIndex !== 'number'){
+          const ps = await db.collection('players').doc(it.id).get();
           it.rankIndex = ps.exists ? (ps.data().rankIndex||0) : 0;
         }
       }
-      // Sort & take top 10
-      items.sort((a,b)=> (b.score||0) - (a.score||0));
-      const top = items.slice(0,10);
-
-      // Render
       lbList.innerHTML = '';
-      if (!top.length){
+      if (!items.length){
         const li = document.createElement('li');
         li.innerHTML = `<div class="lb-left"><span class="rank">–</span><img class="rankIcon" alt="" /><span class="name">No scores yet</span></div><span class="score">–</span>`;
         lbList.appendChild(li);
         return;
       }
       let pos = 1;
-      for (const it of top){
+      for (const it of items){
         const li = document.createElement('li');
         const left = document.createElement('div');
         left.className = 'lb-left';
@@ -665,33 +684,41 @@
     const rwing = new THREE.Mesh(new THREE.BoxGeometry(2.4,0.15,0.6), bodyMat); rwing.position.set(0, 1.15, -2.8); g.add(rwing);
     const rwingVert = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.7,0.05), bodyMat); rwingVert.position.set(0, 1.0, -2.6); g.add(rwingVert);
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5,1.2,14), bodyMat); nose.rotation.x = Math.PI; nose.position.set(0,0.95,3.5); g.add(nose);
+    g.userData.colorMats = [bodyMat];
     return g;
   }
   function makeTailCar(primary=0xff8a00, trim=0x333333){
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.5,4.2),
-      new THREE.MeshStandardMaterial({color:primary, metalness:.4, roughness:.4}));
+    const bodyMat = new THREE.MeshStandardMaterial({color:primary, metalness:.4, roughness:.4});
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.5,4.2), bodyMat);
     body.position.set(0,0.85,0); g.add(body);
     const bump = new THREE.Mesh(new THREE.BoxGeometry(0.8,0.35,0.9),
       new THREE.MeshStandardMaterial({color:0xffffff, metalness:.2, roughness:.6}));
     bump.position.set(0,1.1,0.6); g.add(bump);
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.12,0.45),
-      new THREE.MeshStandardMaterial({color:primary, metalness:.4, roughness:.4}));
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.6,0.12,0.45), bodyMat);
     wing.position.set(0,1.05,-2.1); g.add(wing);
     const wheelMat = new THREE.MeshStandardMaterial({color:trim, metalness:.3, roughness:.6});
     const wheelGeo = new THREE.CylinderGeometry(0.5,0.5,0.3,14);
     const w1 = new THREE.Mesh(wheelGeo, wheelMat), w2 = new THREE.Mesh(wheelGeo, wheelMat);
     w1.rotation.z = Math.PI/2; w2.rotation.z = Math.PI/2;
     w1.position.set(-1.1,0.6,0.8); w2.position.set(1.1,0.6,0.8); g.add(w1); g.add(w2);
+    g.userData.colorMats = [bodyMat];
     return g;
   }
 
   // Cars
   const cars = [];
+  function setCarColor(color){
+    currentRankColor = color;
+    for (const c of cars){
+      const mats = c.mesh.userData && c.mesh.userData.colorMats;
+      if (mats){ mats.forEach(m=>m.color.set(color)); }
+    }
+  }
   cars.push({
     position: new THREE.Vector3(0,0,0),
     rotationY: 0,
-    mesh: makeHeadCar(0xff2d55, 0xbfd8ff),
+    mesh: makeHeadCar(currentRankColor, 0xbfd8ff),
     boost: {active:false, cooldown:0, timer:0}
   });
   scene.add(cars[0].mesh);
@@ -702,7 +729,7 @@
     const follower = {
       position: new THREE.Vector3().copy(leader.position),
       rotationY: leader.rotationY,
-      mesh: makeTailCar(0xff8a00, 0x222222),
+      mesh: makeTailCar(currentRankColor, 0x222222),
     };
     const back = new THREE.Vector3(0,0,-SEGMENT_DISTANCE).applyAxisAngle(new THREE.Vector3(0,1,0), leader.rotationY);
     follower.position.add(back);
@@ -1133,8 +1160,8 @@
 
     let result = null;
     try{
-      result = await applyMatchResultAndSave(playerName || 'Player', score, elapsed);
-      await upsertHighScore(playerName || 'Player', score, result.rankIndex);
+      result = await applyMatchResultAndSave(playerId, playerName || 'Player', score, elapsed);
+      await upsertHighScore(playerId, playerName || 'Player', score, result.rankIndex);
     }catch(e){ console.error('Rank/leaderboard update failed', e); }
 
     const newIdx = result ? result.rankIndex : prevIdx;
@@ -1169,7 +1196,7 @@
   /* ========= Start / Restart ========= */
   async function primeRankSnapshotAndHUD(){
     try{
-      const p = await getOrCreatePlayerRank(playerName);
+      const p = await getOrCreatePlayerRank(playerId, playerName);
       prevRankIndex = p.rankIndex || 0;
       prevRR = p.rr || 0;
       setHudRank(prevRankIndex, prevRR);
