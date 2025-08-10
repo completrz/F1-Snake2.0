@@ -110,11 +110,15 @@
 
   async function submitScore(name, score) {
     try {
-      await db.collection('leaderboard').add({
-        name: name,
-        score: score,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      const docRef = db.collection('leaderboard').doc(name);
+      const doc = await docRef.get();
+      if (!doc.exists || doc.data().score < score) {
+        await docRef.set({
+          name: name,
+          score: score,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
     } catch(e) {
       console.error('Error saving score:', e);
     }
