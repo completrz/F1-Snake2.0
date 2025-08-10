@@ -14,6 +14,7 @@
     position: absolute; top: 12px; left: 12px; color: #fff; z-index: 10;
     background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 8px;
     user-select: none;
+    display: none;
   }
   #leaderboard {
     position: absolute;
@@ -46,13 +47,38 @@
     padding: 4px 0;
     border-bottom: 1px solid #0ff33aa;
   }
-  #playerNameInput {
-    width: 200px;
-    padding: 6px;
+  #namePromptOverlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #000d;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    flex-direction: column;
+    color: #0ff;
+    font-family: monospace;
+  }
+  #nameInput {
+    font-size: 1.5rem;
+    padding: 8px 12px;
     border-radius: 6px;
     border: none;
-    font-size: 1rem;
-    margin-bottom: 12px;
+    width: 300px;
+    max-width: 90vw;
+    margin-top: 12px;
+    text-align: center;
+  }
+  #startBtn {
+    margin-top: 15px;
+    background: #0ff;
+    border: none;
+    color: black;
+    font-weight: bold;
+    padding: 8px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.2rem;
   }
 </style>
 
@@ -63,10 +89,15 @@
 
 </head>
 <body>
+
+<div id="namePromptOverlay">
+  <div>Enter your player name:</div>
+  <input id="nameInput" maxlength="20" placeholder="Your name"/>
+  <button id="startBtn">Start Game</button>
+</div>
+
 <div id="ui">
   Score: <span id="score">0</span><br/>
-  Enter Name: <input id="playerNameInput" type="text" placeholder="Your name" maxlength="20" />
-  <br />
   Controls: A/D or ◀️/▶️ or touch left/right half, double tap or two-finger tap to boost
 </div>
 
@@ -82,19 +113,29 @@
 
   // REPLACE these with your Firebase project config values
   const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    messagingSenderId: "SENDER_ID",
-    appId: "APP_ID"
+    apiKey: "AIzaSyC5seSlgxk4mCRn4HKet4rHlzhQVVBxc-8",
+    authDomain: "f1-snake.firebaseapp.com",
+    projectId: "f1-snake",
+    storageBucket: "f1-snake.firebasestorage.app",
+    messagingSenderId: "575341092161",
+    appId: "1:575341092161:web:b9050e1df88c9e36de95c0",
   };
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
   let playerName = '';
+  let score = 0;
+  let alive = false;
 
+  const namePromptOverlay = document.getElementById('namePromptOverlay');
+  const nameInput = document.getElementById('nameInput');
+  const startBtn = document.getElementById('startBtn');
+  const ui = document.getElementById('ui');
+  const scoreEl = document.getElementById('score');
+  const leaderboardList = document.getElementById('leaderboard-list');
+
+  // Submit or update player's score if higher
   async function submitScoreIfHigher(name, score) {
     if (!name) return;
     try {
@@ -112,18 +153,36 @@
     }
   }
 
-  async function getTopScores(limit = 5) {
-    try {
-      const snapshot = await db.collection('leaderboard')
-        .orderBy('score', 'desc')
-        .limit(limit)
-        .get();
-      return snapshot.docs.map(doc => doc.data());
-    } catch(e) {
-      console.error('Error fetching leaderboard:', e);
-      return [];
-    }
+  // Real-time leaderboard listener
+  function listenLeaderboard() {
+    db.collection('leaderboard')
+      .orderBy('score', 'desc')
+      .limit(10)
+      .onSnapshot(snapshot => {
+        leaderboardList.innerHTML = '';
+        snapshot.forEach(doc => {
+          const entry = doc.data();
+          const li = document.createElement('li');
+          li.textContent = `${entry.name}: ${entry.score}`;
+          leaderboardList.appendChild(li);
+        });
+      }, err => {
+        console.error('Leaderboard listen error:', err);
+      });
   }
+
+  startBtn.onclick = () => {
+    const name = nameInput.value.trim().substring(0, 20);
+    if (!name) {
+      alert('Please enter a valid name.');
+      return;
+    }
+    playerName = name;
+    alive = true;
+    namePromptOverlay.style.display = 'none';
+    ui.style.display = 'block';
+    listenLeaderboard();
+  };
 
   // --- Game code ---
 
@@ -264,17 +323,6 @@
   window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
   window.addEventListener('click', handleTap);
 
-  const scoreEl = document.getElementById('score');
-  const playerNameInput = document.getElementById('playerNameInput');
-  const leaderboardList = document.getElementById('leaderboard-list');
-
-  let score = 0;
-  let alive = true;
-
-  playerNameInput.addEventListener('change', e => {
-    playerName = e.target.value.trim().substring(0,20);
-  });
-
   function canBoost(car) {
     const now = performance.now();
     if (car.boost.cooldown && now < car.boost.cooldown) return false;
@@ -293,43 +341,32 @@
     }
   }
 
-  async function updateLeaderboard() {
-    const topScores = await getTopScores();
-    leaderboardList.innerHTML = '';
-    topScores.forEach((entry, i) => {
-      const li = document.createElement('li');
-      li.textContent = `${i + 1}. ${entry.name}: ${entry.score}`;
-      leaderboardList.appendChild(li);
-    });
-  }
-
-  // Auto update leaderboard every 10 seconds
-  setInterval(() => {
-    if (alive) updateLeaderboard();
-  }, 10000);
-
-  // Initial fetch
-  updateLeaderboard();
-
-  let lastTime = performance.now();
-
   async function trySubmitScore() {
     if (playerName && alive) {
       await submitScoreIfHigher(playerName, score);
     }
   }
 
+  let lastTime = performance.now();
+
+  function gameOver() {
+    alive = false;
+    scoreEl.textContent = `Game Over! Final Score: ${score}`;
+    trySubmitScore();
+  }
+
   async function animate() {
     requestAnimationFrame(animate);
+    if (!alive) {
+      renderer.render(scene, camera);
+      return;
+    }
+
     const now = performance.now();
     const deltaRaw = (now - lastTime) / 1000;
     const delta = Math.min(deltaRaw, 0.05);
     lastTime = now;
 
-    if (!alive) {
-      renderer.render(scene, camera);
-      return;
-    }
     const player = cars[0];
 
     const BASE_SPEED = isMobile ? 7 : 15;
@@ -394,12 +431,6 @@
     camera.lookAt(player.position);
 
     renderer.render(scene, camera);
-  }
-
-  function gameOver() {
-    alive = false;
-    scoreEl.textContent = `Game Over! Final Score: ${score}`;
-    trySubmitScore();
   }
 
   animate();
