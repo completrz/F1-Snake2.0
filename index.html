@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>F1 Snake with Live Leaderboard & Restart</title>
+<title>F1 Snake with Live Leaderboard & Restart & Speed Up</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <style>
   html, body {
@@ -131,7 +131,6 @@
   storageBucket: "f1-snake.firebasestorage.app",
   messagingSenderId: "575341092161",
   appId: "1:575341092161:web:b9050e1df88c9e36de95c0",
-  measurementId: "G-HB1C5TNP3H"
   };
 
   firebase.initializeApp(firebaseConfig);
@@ -252,7 +251,6 @@
   let lastTime = 0;
 
   function initGameObjects() {
-    // Reset everything before starting
     if(renderer){
       scene.clear();
       cars.forEach(c => scene.remove(c.mesh));
@@ -326,7 +324,7 @@
       scene.add(follower.mesh);
       cars.push(follower);
     }
-    window.addFollower = addFollower; // expose to animate()
+    window.addFollower = addFollower;
 
     function spawnPickup() {
       const r = THREE.MathUtils.randFloat(10, ARENA_RADIUS - 10);
@@ -358,7 +356,6 @@
     }
     spawnObstacles();
 
-    // Key and touch events
     window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
     window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
@@ -366,7 +363,6 @@
     window.addEventListener('touchend', handleTouchEnd, { passive: false });
     window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
     window.addEventListener('click', handleTap);
-
   }
 
   function canBoost(car) {
@@ -435,7 +431,14 @@
 
     const player = cars[0];
 
-    const BASE_SPEED = isMobile ? 7 : 15;
+    // Speed increases with score (up to a max)
+    // Base speed + (score * factor), capped at max speed
+    const baseSpeed = isMobile ? 7 : 15;
+    const maxSpeed = isMobile ? 25 : 40;
+    const speedIncreasePerPoint = isMobile ? 0.35 : 0.6;
+    let dynamicSpeed = baseSpeed + score * speedIncreasePerPoint;
+    if(dynamicSpeed > maxSpeed) dynamicSpeed = maxSpeed;
+
     const ROTATION_SPEED = isMobile ? 2.5 : 3.5;
 
     if (keys['a'] || keys['arrowleft'] || touchLeft) player.rotationY += ROTATION_SPEED * delta;
@@ -446,7 +449,7 @@
     }
     updateBoost(player);
 
-    const speed = BASE_SPEED * (player.boost.active ? BOOST_MULTIPLIER : 1);
+    const speed = dynamicSpeed * (player.boost.active ? BOOST_MULTIPLIER : 1);
 
     const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotationY);
     player.position.add(forward.multiplyScalar(speed * delta));
@@ -462,12 +465,6 @@
       }
       const targetRotation = Math.atan2(dir.x, dir.z);
       follower.rotationY += (targetRotation - follower.rotationY) * 0.15;
-    }
-
-    for (let i = 0; i < cars.length; i++) {
-      const c = cars[i];
-      c.mesh.position.copy(c.position).setY(0.6);
-      c.mesh.rotation.y = c.rotationY;
     }
 
     for (let i = pickups.length - 1; i >= 0; i--) {
@@ -528,4 +525,3 @@
 </script>
 </body>
 </html>
-
