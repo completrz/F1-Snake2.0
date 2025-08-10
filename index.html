@@ -303,24 +303,30 @@
       return group;
     }
 
-    cars.push({
+    // Start with ONLY 1 car at origin, no followers yet
+    const mainCar = {
       position: new THREE.Vector3(0, 0, 0),
       rotationY: 0,
       mesh: makeCar(0xff2d55),
       boost: { active: false, cooldown: 0, timer: 0 }
-    });
-    scene.add(cars[0].mesh);
-    cars[0].mesh.position.set(0, 0, 0);
+    };
+    scene.add(mainCar.mesh);
+    mainCar.mesh.position.set(0, 0, 0);
+    cars.push(mainCar);
 
+    // Followers start directly behind main car with proper spacing
     function addFollower() {
       const leader = cars[cars.length - 1];
+      const backOffset = new THREE.Vector3(0, 0, -SEGMENT_DISTANCE);
+      backOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), leader.rotationY);
+
+      const followerPos = leader.position.clone().add(backOffset);
       const follower = {
-        position: new THREE.Vector3().copy(leader.position),
+        position: followerPos,
         rotationY: leader.rotationY,
         mesh: makeCar(0xff8a00),
       };
-      const backOffset = new THREE.Vector3(0, 0, -SEGMENT_DISTANCE).applyAxisAngle(new THREE.Vector3(0,1,0), leader.rotationY);
-      follower.position.add(backOffset);
+      follower.mesh.position.copy(follower.position);
       scene.add(follower.mesh);
       cars.push(follower);
     }
@@ -432,7 +438,6 @@
     const player = cars[0];
 
     // Speed increases with score (up to a max)
-    // Base speed + (score * factor), capped at max speed
     const baseSpeed = isMobile ? 7 : 15;
     const maxSpeed = isMobile ? 25 : 40;
     const speedIncreasePerPoint = isMobile ? 0.35 : 0.6;
@@ -451,9 +456,13 @@
 
     const speed = dynamicSpeed * (player.boost.active ? BOOST_MULTIPLIER : 1);
 
+    // Move main car forward
     const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotationY);
     player.position.add(forward.multiplyScalar(speed * delta));
+    player.mesh.position.copy(player.position);
+    player.mesh.rotation.y = player.rotationY;
 
+    // Move followers
     for (let i = 1; i < cars.length; i++) {
       const leader = cars[i - 1];
       const follower = cars[i];
@@ -465,8 +474,12 @@
       }
       const targetRotation = Math.atan2(dir.x, dir.z);
       follower.rotationY += (targetRotation - follower.rotationY) * 0.15;
+
+      follower.mesh.position.copy(follower.position);
+      follower.mesh.rotation.y = follower.rotationY;
     }
 
+    // Pickups collision
     for (let i = pickups.length - 1; i >= 0; i--) {
       if (pickups[i].position.distanceTo(player.position) < 3) {
         scene.remove(pickups[i]);
@@ -479,6 +492,7 @@
       }
     }
 
+    // Obstacles collision
     for(const obs of obstacles){
       if(obs.position.distanceTo(player.position) < 4.5){
         await trySubmitScore();
@@ -486,19 +500,24 @@
       }
     }
 
+    // Boundary check
     if (player.position.length() > ARENA_RADIUS) {
       await trySubmitScore();
       showRestartScreen();
     }
 
-    const camOffset = new THREE.Vector3(0, 15, -30).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotationY);
-    camera.position.copy(player.position.clone().add(camOffset));
+    // Camera follow
+    camera.position.lerp(new THREE.Vector3(
+      player.position.x - 30 * Math.sin(player.rotationY),
+      player.position.y + 20,
+      player.position.z - 30 * Math.cos(player.rotationY)
+    ), 0.1);
     camera.lookAt(player.position);
 
     renderer.render(scene, camera);
   }
 
-  // Spawn a single pickup
+  // Spawn a pickup anywhere inside arena
   function spawnPickup() {
     const r = THREE.MathUtils.randFloat(10, ARENA_RADIUS - 10);
     const a = THREE.MathUtils.randFloat(0, Math.PI * 2);
@@ -520,7 +539,9 @@
     }
   });
 
-  animate();
+  // Start listening to leaderboard even before game starts for instant update
+  listenLeaderboard();
+
 })();
 </script>
 </body>
