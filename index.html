@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>F1 Snake with Leaderboard</title>
+<title>F1 Snake with On-Screen Leaderboard</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <style>
   html, body {
@@ -14,6 +14,50 @@
     position: absolute; top: 12px; left: 12px; color: #fff; z-index: 10;
     background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 8px;
     user-select: none;
+  }
+  #leaderboard {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.85);
+    color: #0ff;
+    padding: 20px 30px;
+    border-radius: 12px;
+    font-size: 1.1rem;
+    max-width: 300px;
+    max-height: 70vh;
+    overflow-y: auto;
+    display: none;
+    z-index: 20;
+    box-shadow: 0 0 20px #0ff;
+  }
+  #leaderboard h2 {
+    margin-top: 0;
+    text-align: center;
+    color: #0ff;
+    font-weight: bold;
+  }
+  #leaderboard ul {
+    list-style: none;
+    padding-left: 0;
+  }
+  #leaderboard li {
+    margin: 6px 0;
+    padding: 4px 0;
+    border-bottom: 1px solid #0ff33aa;
+  }
+  #leaderboard button {
+    margin-top: 15px;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    background: #0ff;
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: bold;
+    cursor: pointer;
   }
 </style>
 
@@ -28,6 +72,12 @@
   Score: <span id="score">0</span>
   <br />
   Controls: A/D or ◀️/▶️ or touch left/right half, double tap or two-finger tap to boost
+</div>
+
+<div id="leaderboard">
+  <h2>🏆 Leaderboard 🏆</h2>
+  <ul id="leaderboard-list"></ul>
+  <button id="close-leaderboard">Close</button>
 </div>
 
 <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
@@ -236,6 +286,16 @@
     }
   }
 
+  // Leaderboard DOM refs
+  const leaderboardDiv = document.getElementById('leaderboard');
+  const leaderboardList = document.getElementById('leaderboard-list');
+  const closeLeaderboardBtn = document.getElementById('close-leaderboard');
+
+  closeLeaderboardBtn.onclick = () => {
+    leaderboardDiv.style.display = 'none';
+    window.location.reload(); // reload page to restart game
+  };
+
   let lastTime = performance.now();
 
   async function gameOver() {
@@ -248,11 +308,14 @@
       await submitScore(playerName, score);
       const topScores = await getTopScores();
 
-      let leaderboardStr = '🏆 Leaderboard 🏆\n\n';
+      leaderboardList.innerHTML = '';
       topScores.forEach((entry, i) => {
-        leaderboardStr += `${i + 1}. ${entry.name}: ${entry.score}\n`;
+        const li = document.createElement('li');
+        li.textContent = `${i + 1}. ${entry.name}: ${entry.score}`;
+        leaderboardList.appendChild(li);
       });
-      alert(leaderboardStr);
+
+      leaderboardDiv.style.display = 'block';
     }
   }
 
