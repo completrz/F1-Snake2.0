@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>F1 Snake — Leaderboard + Chat + Prime Karambit + Ranks + RR</title>
+<title>F1 Snake — Leaderboard + Chat + Ranks + RR + 2x XP + Middle Obstacles</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <style>
   :root{
@@ -34,6 +34,14 @@
   #rrText { padding:2px 6px; border-radius:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); font-variant-numeric:tabular-nums; }
 
   #hint   { margin-top: 6px; font-size: 12px; opacity: .85; line-height: 1.35; }
+
+  /* 2x XP badge */
+  #xpBadge{
+    margin-top:8px; display:none; align-items:center; gap:8px; font-size:12px; font-weight:800;
+    background: rgba(0,229,255,0.15); border:1px solid rgba(0,229,255,0.35); padding:6px 8px; border-radius:10px;
+  }
+  #xpBadge .dot{ width:8px; height:8px; border-radius:50%; background:#00ffd9; box-shadow:0 0 10px #00ffd9; }
+  #xpTime{ font-variant-numeric: tabular-nums; }
 
   /* Chat (square, under instructions, left) */
   #chat {
@@ -178,6 +186,7 @@
     <span id="rankText">Rank: —</span>
     <span id="rrText">RR: —</span>
   </div>
+  <div id="xpBadge"><span class="dot"></span> 2× XP active — <span id="xpTime">00.0s</span></div>
   <div id="hint">Controls: A/D or ◀️/▶️ • Touch left/right • Double-tap/2-finger = Boost • Press <b>F</b> to inspect</div>
 
   <div id="chat">
@@ -280,6 +289,9 @@
   const rankUpBadge = document.getElementById('rankUpBadge');
   const rankUpText = document.getElementById('rankUpText');
 
+  const xpBadge = document.getElementById('xpBadge');
+  const xpTime = document.getElementById('xpTime');
+
   /* ========= State ========= */
   let playerName = localStorage.getItem('f1snake_name') || '';
   if (playerName) { nameInput.value = playerName; }
@@ -291,6 +303,11 @@
   // Rank snapshot for RR delta calculation
   let prevRankIndex = 0;
   let prevRR = 0;
+
+  // XP Multiplier
+  let xpMultActive = false;
+  let xpMultUntil = 0;
+  const XP_DURATION_MS = 15000;
 
   /* ========= Ranks ========= */
   const RANKS = [
@@ -328,10 +345,11 @@
       default: return '#999';
     }
   }
-  function rankBadgeDataURI(idx){
+  function rankBadgeDataURI(idx, big=false){
     const col = rankColor(idx);
+    const size = big?120:18;
     const svg =
-`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 18 18">
+`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 18 18">
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="${col}"/>
@@ -393,7 +411,7 @@
     }
     rr += delta;
 
-    // promotions / demotions with overflow (double rank up possible)
+    // promotions / demotions with overflow
     let promos = 0, deranks = 0;
     while (rr >= 100 && idx < RADIANT_INDEX){ rr -= 100; idx += 1; promos++; }
     while (rr < 0 && idx > 0){ rr += 100; idx -= 1; deranks++; }
@@ -405,70 +423,84 @@
     return { ...newData, delta, promos, deranks };
   }
 
-  async function submitScoreAndMirrorRank(name, scoreVal, rankData){
+  // Prevent future duplicates: write one doc per user (id = sanitized name) and keep highest score
+  async function upsertHighScore(name, scoreVal, rankIndex){
+    const id = sanitizeId(name);
+    const ref = db.collection('leaderboard').doc(id);
     try{
-      await db.collection('leaderboard').add({
-        name,
-        score: scoreVal,
-        rankIndex: rankData?.rankIndex ?? 0,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      await db.runTransaction(async (tx)=>{
+        const snap = await tx.get(ref);
+        if (!snap.exists){
+          tx.set(ref, {
+            name, score: scoreVal, rankIndex: rankIndex ?? 0,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        } else {
+          const cur = snap.data();
+          if ((cur.score||0) < scoreVal){
+            tx.set(ref, {
+              name, score: scoreVal, rankIndex: rankIndex ?? (cur.rankIndex||0),
+              timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            }, {merge:true});
+          } else if (typeof rankIndex === 'number' && (cur.rankIndex||0)!==rankIndex){
+            tx.set(ref, { rankIndex }, {merge:true});
+          }
+        }
       });
-    }catch(e){ console.error(e); }
+    }catch(e){ console.error('upsertHighScore failed', e); }
   }
 
-  /* ========= Leaderboard ========= */
+  /* ========= Leaderboard (de-duplicate existing) ========= */
   function startLeaderboardListener(){
-    db.collection('leaderboard').orderBy('score','desc').limit(10).onSnapshot(async snap=>{
-      lbList.innerHTML = '';
-      let rankPos = 1;
-      const items = [];
+    db.collection('leaderboard').orderBy('score','desc').limit(100).onSnapshot(async snap=>{
+      // Client-side collapse by name to handle old duplicate entries
+      const byName = new Map();
       snap.forEach(doc=>{
         const d = doc.data();
-        items.push({id: doc.id, name: d.name||'Player', score: d.score||0, rankIndex: (typeof d.rankIndex==='number')? d.rankIndex : null});
+        const key = sanitizeId(d.name||'Player');
+        const existing = byName.get(key);
+        if (!existing || (d.score||0) > existing.score){
+          byName.set(key, {name: d.name||'Player', score: d.score||0, rankIndex: (typeof d.rankIndex==='number')? d.rankIndex : null});
+        }
       });
 
-      const fetches = items.map(async it=>{
+      // Fetch missing rankIndex from players
+      const items = Array.from(byName.values());
+      for (let it of items){
         if (it.rankIndex === null){
           const ps = await db.collection('players').doc(sanitizeId(it.name)).get();
           it.rankIndex = ps.exists ? (ps.data().rankIndex||0) : 0;
         }
-        return it;
-      });
-      const resolved = await Promise.all(fetches);
+      }
+      // Sort & take top 10
+      items.sort((a,b)=> (b.score||0) - (a.score||0));
+      const top = items.slice(0,10);
 
-      for (const it of resolved){
+      // Render
+      lbList.innerHTML = '';
+      if (!top.length){
+        const li = document.createElement('li');
+        li.innerHTML = `<div class="lb-left"><span class="rank">–</span><img class="rankIcon" alt="" /><span class="name">No scores yet</span></div><span class="score">–</span>`;
+        lbList.appendChild(li);
+        return;
+      }
+      let pos = 1;
+      for (const it of top){
         const li = document.createElement('li');
         const left = document.createElement('div');
         left.className = 'lb-left';
         const rankSpan = document.createElement('span');
-        rankSpan.className = 'rank';
-        rankSpan.textContent = rankPos;
+        rankSpan.className = 'rank'; rankSpan.textContent = pos;
         const img = document.createElement('img');
-        img.className = 'rankIcon';
-        img.src = rankBadgeDataURI(it.rankIndex||0);
-        img.alt = '';
+        img.className = 'rankIcon'; img.src = rankBadgeDataURI(it.rankIndex||0); img.alt = '';
         const nameSpan = document.createElement('span');
-        nameSpan.className = 'name';
-        nameSpan.textContent = it.name;
+        nameSpan.className = 'name'; nameSpan.textContent = it.name;
 
-        left.appendChild(rankSpan);
-        left.appendChild(img);
-        left.appendChild(nameSpan);
+        left.appendChild(rankSpan); left.appendChild(img); left.appendChild(nameSpan);
+        const scoreSpan = document.createElement('span'); scoreSpan.className = 'score'; scoreSpan.textContent = it.score;
 
-        const scoreSpan = document.createElement('span');
-        scoreSpan.className = 'score';
-        scoreSpan.textContent = it.score;
-
-        li.appendChild(left);
-        li.appendChild(scoreSpan);
-        lbList.appendChild(li);
-        rankPos++;
-      }
-
-      if (rankPos === 1){
-        const li = document.createElement('li');
-        li.innerHTML = `<div class="lb-left"><span class="rank">–</span><img class="rankIcon" alt="" /><span class="name">No scores yet</span></div><span class="score">–</span>`;
-        lbList.appendChild(li);
+        li.appendChild(left); li.appendChild(scoreSpan); lbList.appendChild(li);
+        pos++;
       }
     });
   }
@@ -478,9 +510,7 @@
   const CHAT_MAX = 50;
   function startChatListener(){
     db.collection('chat').orderBy('timestamp','desc').limit(CHAT_MAX).onSnapshot(snap=>{
-      const arr = [];
-      snap.forEach(d=>arr.push(d.data()));
-      arr.reverse();
+      const arr = []; snap.forEach(d=>arr.push(d.data())); arr.reverse();
       chatMessagesEl.innerHTML = '';
       arr.forEach(m=>{
         const time = m.timestamp ? new Date(m.timestamp.seconds*1000).toLocaleTimeString() : '';
@@ -492,8 +522,7 @@
     });
   }
   async function sendMessage(text){
-    const t = (text||'').trim();
-    if (!t) return;
+    const t = (text||'').trim(); if (!t) return;
     await db.collection('chat').add({
       name: playerName || 'Player',
       message: t,
@@ -503,13 +532,12 @@
     const all = await db.collection('chat').orderBy('timestamp','asc').get();
     if (all.size > CHAT_MAX){
       const toDelete = all.docs.slice(0, all.size-CHAT_MAX);
-      const batch = db.batch();
-      toDelete.forEach(doc=>batch.delete(doc.ref));
-      await batch.commit();
+      const batch = db.batch(); toDelete.forEach(doc=>batch.delete(doc.ref)); await batch.commit();
     }
   }
-  const chatInput = (e)=>{ if (e.key === 'Enter'){ e.preventDefault(); sendMessage(chatInputEl.value); chatInputEl.value=''; } };
-  chatInputEl.addEventListener('keydown', chatInput);
+  chatInputEl.addEventListener('keydown', e=>{
+    if (e.key === 'Enter'){ e.preventDefault(); sendMessage(chatInputEl.value); chatInputEl.value=''; }
+  });
 
   /* ========= THREE / Scene ========= */
   const ARENA_RADIUS = 120;
@@ -520,7 +548,7 @@
   const BOOST_MULTIPLIER = 2.4;
   const BOOST_DURATION = 2000;
   const BOOST_COOLDOWN = 4000;
-  const OBSTACLE_COUNT = 12;
+  const OBSTACLE_COUNT = 16; // a bit more
   const isMobile = /Mobi|Android/i.test(navigator.userAgent);
 
   const scene = new THREE.Scene();
@@ -701,7 +729,10 @@
   }
   function randomPointInCircle(minR, maxR){
     const u = Math.random();
-    const r = Math.sqrt(u) * (maxR - minR) + minR;
+    // sqrt(u) makes uniform area; tweak bias toward center by using linear u (more central)
+    const bias = 0.35; // 0..1, higher = more central
+    const rU = bias*u + (1-bias)*Math.sqrt(u);
+    const r = rU * (maxR - minR) + minR;
     const a = Math.random() * Math.PI * 2;
     return new THREE.Vector3(Math.cos(a)*r, 0, Math.sin(a)*r);
   }
@@ -714,7 +745,36 @@
   }
   for(let i=0;i<10;i++) spawnPickup();
 
-  /* ---------- Obstacles ---------- */
+  /* ---------- 2x XP Gems ---------- */
+  const xpGems = [];
+  function makeGem(){
+    const g = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(1.0, 1),
+      new THREE.MeshStandardMaterial({color:0x57a0ff, emissive:0x5fb0ff, emissiveIntensity:0.8, metalness:0.2, roughness:0.4})
+    );
+    core.position.y = 1.1; g.add(core);
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(1.4, 0.07, 10, 40),
+      new THREE.MeshBasicMaterial({color:0x9bd1ff, transparent:true, opacity:0.55})
+    );
+    halo.rotation.x = Math.PI/2; halo.position.y = 1.1; g.add(halo);
+    return g;
+  }
+  function spawnGem(){
+    const gem = makeGem();
+    // bias to middle area (inner half)
+    const pos = randomPointInCircle(4, ARENA_RADIUS * 0.55);
+    gem.position.copy(pos);
+    scene.add(gem);
+    xpGems.push({mesh:gem, phase:Math.random()*Math.PI*2});
+  }
+  // keep up to 2 gems on field
+  function maintainGems(){
+    if (xpGems.length < 2 && Math.random() < 0.01) spawnGem();
+  }
+
+  /* ---------- Obstacles (more in middle) ---------- */
   const obstacles = [];
   const barrelMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -737,7 +797,23 @@
     return g;
   }
   function spawnObstacles(){
-    for(let i=0;i<OBSTACLE_COUNT;i++){
+    const middleCount = Math.floor(OBSTACLE_COUNT * 0.6);
+    const outerCount  = OBSTACLE_COUNT - middleCount;
+
+    // Middle-biased obstacles (inner area)
+    for(let i=0;i<middleCount;i++){
+      const pos = randomPointInCircle(6, ARENA_RADIUS * 0.6); // inner 60%
+      const b = makeBarrier(); b.position.copy(pos); scene.add(b);
+      const mode = (i % 2 === 0) ? 'circle' : 'bounce';
+      const amp = THREE.MathUtils.randFloat(4, 9); // smaller paths in middle
+      const freq = THREE.MathUtils.randFloat(0.18, 0.5);
+      const phase = Math.random() * Math.PI * 2;
+      let dir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5);
+      if (dir.lengthSq() < 0.01) dir.set(1,0,0); dir.normalize();
+      obstacles.push({ mesh:b, base: b.position.clone(), mode, amp, freq, phase, dir });
+    }
+    // General obstacles (anywhere except extreme border)
+    for(let i=0;i<outerCount;i++){
       const pos = randomPointInCircle(10, ARENA_RADIUS - 12);
       const b = makeBarrier(); b.position.copy(pos); scene.add(b);
       const mode = (i % 2 === 0) ? 'circle' : 'bounce';
@@ -745,8 +821,7 @@
       const freq = THREE.MathUtils.randFloat(0.15, 0.45);
       const phase = Math.random() * Math.PI * 2;
       let dir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5);
-      if (dir.lengthSq() < 0.01) dir.set(1,0,0);
-      dir.normalize();
+      if (dir.lengthSq() < 0.01) dir.set(1,0,0); dir.normalize();
       obstacles.push({ mesh:b, base: b.position.clone(), mode, amp, freq, phase, dir });
     }
   }
@@ -834,6 +909,7 @@
     return g;
   }
   function addKnifeToCamera(){
+    if (knife.group) return;
     knife.group = makePrimeKarambit();
     camera.add(knife.group);
     knife.group.position.copy(knife.basePos);
@@ -897,6 +973,19 @@
     const t = (now - sessionStart)/1000;
     const player = cars[0];
 
+    // XP badge visibility
+    if (xpMultActive && now < xpMultUntil){
+      xpBadge.style.display = 'flex';
+      const rem = (xpMultUntil - now)/1000;
+      xpTime.textContent = `${rem.toFixed(1)}s`;
+    } else {
+      xpMultActive = false; xpBadge.style.display = 'none';
+    }
+
+    // Maintain up to 2 gems
+    maintainGems();
+
+    // Speed scales with score
     const BASE_MIN   = isMobile ? 7 : 13;
     const BASE_MAX   = isMobile ? 26 : 42;
     const PER_POINT  = isMobile ? 0.35 : 0.6;
@@ -918,6 +1007,7 @@
       const fwd = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
       player.position.add(fwd.multiplyScalar(speed * dt));
 
+      // followers
       for (let i=1;i<cars.length;i++){
         const lead = cars[i-1], foll = cars[i];
         const dir = new THREE.Vector3().subVectors(lead.position, foll.position);
@@ -930,26 +1020,43 @@
         foll.rotationY += (targetRot - foll.rotationY) * 0.15;
       }
 
+      // apply transforms
       for (let i=0;i<cars.length;i++){
         const c = cars[i];
         c.mesh.position.copy(c.position).setY(0);
         c.mesh.rotation.y = c.rotationY;
       }
 
+      // animate pickups
       for (const p of pickups){
         const y = p.baseY + Math.sin(t*2 + p.phase)*0.3 + 0.8;
         p.mesh.position.y = y;
         p.mesh.rotation.y += 0.02;
       }
+      // animate gems
+      for (const g of xpGems){
+        g.mesh.position.y = 0.9 + Math.sin(t*2.4 + g.phase)*0.35;
+        g.mesh.rotation.y += 0.03;
+      }
 
+      // collect pickups
       for (let i=pickups.length-1; i>=0; i--){
         if (pickups[i].mesh.position.distanceTo(player.position) < 3){
           scene.remove(pickups[i].mesh); pickups.splice(i,1);
-          score++; scoreEl.textContent = score;
+          score += xpMultActive ? 2 : 1;
+          scoreEl.textContent = score;
           addFollower(); spawnPickup();
         }
       }
+      // collect gems
+      for (let i=xpGems.length-1; i>=0; i--){
+        if (xpGems[i].mesh.position.distanceTo(player.position) < 3.2){
+          scene.remove(xpGems[i].mesh); xpGems.splice(i,1);
+          xpMultActive = true; xpMultUntil = now + XP_DURATION_MS;
+        }
+      }
 
+      // moving barriers start after score >= 8
       const moveFactor = Math.min(1, Math.max(0, (score - 8) / 12));
       if (moveFactor > 0){
         for (const o of obstacles){
@@ -968,6 +1075,7 @@
         for (const o of obstacles){ o.mesh.position.copy(o.base); }
       }
 
+      // collisions & wall
       if (canDie()){
         for (const o of obstacles){
           if (o.mesh.position.distanceTo(player.position) < 4.0){ doGameOver(); break; }
@@ -978,6 +1086,7 @@
 
     updateKnife();
 
+    // camera follow
     const camOffset = new THREE.Vector3(0, 15, -30).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
     camera.position.copy(player.position.clone().add(camOffset));
     camera.lookAt(player.position);
@@ -1006,7 +1115,7 @@
   function showRankUpAnimation(newIdx, promos){
     const rect = rankNowIcon.getBoundingClientRect();
     spawnBursts(rect.left + rect.width/2, rect.top + rect.height/2, 36 + promos*12);
-    rankUpBadge.src = rankBadgeDataURI(newIdx);
+    rankUpBadge.src = rankBadgeDataURI(newIdx, true);
     rankUpText.textContent = promos >= 2 ? 'DOUBLE PROMOTION!' : 'RANK UP!';
     rankUpOverlay.style.display = 'grid';
     setTimeout(()=>{ rankUpOverlay.style.display='none'; }, 1400);
@@ -1019,23 +1128,19 @@
 
     const elapsed = performance.now() - gameStartMs;
 
-    // Previous snapshot (from start of match)
     const prevIdx = prevRankIndex;
     const prevRRLocal = prevRR;
 
-    // Apply and save
     let result = null;
     try{
       result = await applyMatchResultAndSave(playerName || 'Player', score, elapsed);
-      await submitScoreAndMirrorRank(playerName || 'Player', score, result);
+      await upsertHighScore(playerName || 'Player', score, result.rankIndex);
     }catch(e){ console.error('Rank/leaderboard update failed', e); }
 
-    // Update HUD immediately to new values
     const newIdx = result ? result.rankIndex : prevIdx;
     const newRR = result ? result.rr : prevRRLocal;
     setHudRank(newIdx, newRR);
 
-    // RR delta across tiers
     const deltaTotal = totalRR(newIdx, newRR) - totalRR(prevIdx, prevRRLocal);
     const sign = deltaTotal >= 0 ? '+' : '';
     rrDeltaEl.textContent = `(${sign}${deltaTotal} RR)`;
@@ -1083,13 +1188,14 @@
     await primeRankSnapshotAndHUD();
 
     score = 0; scoreEl.textContent = '0';
+    xpMultActive = false; xpBadge.style.display='none';
     setStartPosition();
     gameStartMs = performance.now();
     timerEl.textContent = '00:00';
     chatBox.style.display = 'flex';
     startOverlay.style.display = 'none';
     alive = true;
-    if (!knife.group) addKnifeToCamera();
+    addKnifeToCamera();
   });
   nameInput.addEventListener('keydown', e=>{ if (e.key==='Enter') startBtn.click(); });
 
@@ -1101,13 +1207,14 @@
     await primeRankSnapshotAndHUD();
 
     score = 0; scoreEl.textContent = '0';
+    xpMultActive = false; xpBadge.style.display='none';
     setStartPosition();
     gameStartMs = performance.now();
     timerEl.textContent = '00:00';
     for (const o of obstacles){ o.mesh.position.copy(o.base); }
     restartOverlay.style.display = 'none';
     alive = true;
-    if (!knife.group) addKnifeToCamera();
+    addKnifeToCamera();
   });
 
   // Start listeners/render
