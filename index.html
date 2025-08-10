@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>F1 Snake — Leaderboard + Chat</title>
+<title>F1 Snake — Leaderboard + Chat + Knife Inspect + Reels</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <style>
   :root{
@@ -11,18 +11,17 @@
     --accent: #00e5ff;
   }
   html, body {
-    margin: 0; height: 100%; overflow: hidden; background: #87b6ff; /* fallback sky */
+    margin: 0; height: 100%; overflow: hidden; background: #87b6ff;
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     color: #fff;
     touch-action: none;
   }
 
-  /* HUD (left) */
+  /* Left HUD */
   #hud {
     position: absolute; top: 14px; left: 14px; z-index: 30;
     background: var(--glass); padding: 10px 12px; border-radius: 12px;
-    backdrop-filter: blur(6px);
-    width: 260px;
+    backdrop-filter: blur(6px); width: 260px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.35);
   }
   #scoreRow { font-weight: 700; font-size: 18px; display:flex; justify-content:space-between; }
@@ -54,12 +53,14 @@
   }
   #chatInput::placeholder{ color:#8aa0b4; }
 
-  /* Leaderboard (top-right) */
-  #leaderboard {
+  /* Right column (leaderboard + reels) */
+  #rightCol{
     position: absolute; top: 14px; right: 14px; z-index: 30;
-    width: 300px; max-height: 360px; overflow-y: auto;
-    background: var(--panel);
-    border: 1px solid rgba(255,255,255,0.08);
+    width: 320px; display:flex; flex-direction:column; gap: 12px;
+  }
+  #leaderboard {
+    width: 100%; max-height: 360px; overflow-y: auto;
+    background: var(--panel); border: 1px solid rgba(255,255,255,0.08);
     border-radius: 14px; box-shadow: 0 6px 22px rgba(0,0,0,0.45);
     backdrop-filter: blur(6px);
   }
@@ -84,6 +85,17 @@
   #lbList li .name{ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #lbList li .score{ font-weight: 700; color: #b7f; }
 
+  /* Reels panel */
+  #reelsPanel{
+    width: 100%; height: 360px; overflow-y: auto;
+    background: var(--panel); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px; box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+    backdrop-filter: blur(6px); padding: 8px 8px 2px;
+  }
+  #reelsPanel h4{
+    margin: 6px 6px 10px; font-size: 13px; font-weight: 700; opacity:.9;
+  }
+
   /* Overlays (start/restart) */
   .overlay {
     position: fixed; inset: 0; display: none; place-items: center; z-index: 50;
@@ -98,8 +110,7 @@
     border-radius: 16px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.6);
     padding: 22px 22px 18px;
-    text-align: center;
-    backdrop-filter: blur(10px);
+    text-align: center; backdrop-filter: blur(10px);
   }
   .title { font-weight: 800; font-size: 28px; letter-spacing:.3px; margin: 4px 0 6px; }
   .subtitle { opacity:.85; font-size: 14px; margin-bottom: 14px; }
@@ -126,16 +137,18 @@
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+<!-- Instagram embed script -->
+<script async src="https://www.instagram.com/embed.js"></script>
 </head>
 <body>
 
-<!-- HUD -->
+<!-- Left HUD -->
 <div id="hud">
   <div id="scoreRow">
     <span>Score: <span id="score">0</span></span>
     <span id="timer">00:00</span>
   </div>
-  <div id="hint">Controls: A/D or ◀️/▶️ • Touch left/right • Double-tap/2-finger = Boost</div>
+  <div id="hint">Controls: A/D or ◀️/▶️ • Touch left/right • Double-tap/2-finger = Boost • Press <b>F</b> to inspect</div>
 
   <div id="chat">
     <div id="chatHeader">💬 Global Chat</div>
@@ -144,10 +157,17 @@
   </div>
 </div>
 
-<!-- Leaderboard (top-right) -->
-<div id="leaderboard">
-  <div id="lbHeader"><span class="dot"></span><h3>Top 10 — Global Leaderboard</h3></div>
-  <ul id="lbList"><li><span class="rank">–</span><span class="name">Loading…</span><span class="score">–</span></li></ul>
+<!-- Right column -->
+<div id="rightCol">
+  <div id="leaderboard">
+    <div id="lbHeader"><span class="dot"></span><h3>Top 10 — Global Leaderboard</h3></div>
+    <ul id="lbList"><li><span class="rank">–</span><span class="name">Loading…</span><span class="score">–</span></li></ul>
+  </div>
+  <div id="reelsPanel">
+    <h4>Instagram Reels</h4>
+    <!-- Reels render here -->
+    <div id="reelsContainer"></div>
+  </div>
 </div>
 
 <!-- Start overlay -->
@@ -315,31 +335,31 @@
   /* ---------- Sky Dome (gradient) ---------- */
   function makeSkyDome(){
     const c = document.createElement('canvas');
-    c.width = 2; c.height = 256; // vertical gradient
+    c.width = 2; c.height = 256;
     const ctx = c.getContext('2d');
     const grd = ctx.createLinearGradient(0,0,0,256);
-    grd.addColorStop(0,   '#83b8ff'); // zenith
-    grd.addColorStop(0.6, '#a9ccff'); // mid
-    grd.addColorStop(1,   '#d8e8ff'); // horizon
+    grd.addColorStop(0,   '#83b8ff');
+    grd.addColorStop(0.6, '#a9ccff');
+    grd.addColorStop(1,   '#d8e8ff');
     ctx.fillStyle = grd; ctx.fillRect(0,0,2,256);
     const tex = new THREE.CanvasTexture(c);
     tex.magFilter = THREE.LinearFilter;
     const geo = new THREE.SphereGeometry(1500, 32, 16);
     const mat = new THREE.MeshBasicMaterial({map: tex, side: THREE.BackSide});
-    const sky = new THREE.Mesh(geo, mat);
-    return sky;
+    return new THREE.Mesh(geo, mat);
   }
   scene.add(makeSkyDome());
 
   /* ---------- Lights ---------- */
-  const hemiLight = new THREE.HemisphereLight(0xcfe3ff, 0x8fb3d9, 0.6); // sky/ground tint
+  const hemiLight = new THREE.HemisphereLight(0xcfe3ff, 0x8fb3d9, 0.6);
   scene.add(hemiLight);
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
   dirLight.position.set(60, 120, 40);
   scene.add(dirLight);
 
   /* ---------- Track / Ground ---------- */
-  // Center grass
+  const trackInner = ARENA_RADIUS - 28;
+
   const grass = new THREE.Mesh(
     new THREE.CircleGeometry(ARENA_RADIUS, 128),
     new THREE.MeshStandardMaterial({color:0x7bbf5d, roughness:0.95, metalness:0.0})
@@ -348,8 +368,6 @@
   grass.receiveShadow = true;
   scene.add(grass);
 
-  // Asphalt ring as track
-  const trackInner = ARENA_RADIUS - 28; // track width ~28
   const asphalt = new THREE.Mesh(
     new THREE.RingGeometry(trackInner, ARENA_RADIUS, 256),
     new THREE.MeshStandardMaterial({color:0x2f3238, roughness:0.95, metalness:0.0})
@@ -358,7 +376,6 @@
   asphalt.position.y = 0.01;
   scene.add(asphalt);
 
-  // Curbs (red/white) outer and inner
   function curbTexture(){
     const c = document.createElement('canvas');
     c.width = 512; c.height = 16;
@@ -381,7 +398,6 @@
   const curbInner = new THREE.Mesh(new THREE.RingGeometry(trackInner+0.2, trackInner+1.5, 256), curbMatInner);
   curbInner.rotation.x = -Math.PI/2; curbInner.position.y = 0.015; scene.add(curbInner);
 
-  // Start grid tile on track
   function makeCheckeredTile(){
     const c = document.createElement('canvas');
     c.width = c.height = 128;
@@ -392,8 +408,7 @@
         ctx.fillRect(x*16,y*16,16,16);
       }
     }
-    const tex = new THREE.CanvasTexture(c);
-    return tex;
+    return new THREE.CanvasTexture(c);
   }
   const gridMat = new THREE.MeshBasicMaterial({ map: makeCheckeredTile(), transparent:true, opacity:0.75 });
   const gridMesh = new THREE.Mesh(new THREE.PlaneGeometry(12,6), gridMat);
@@ -426,7 +441,6 @@
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5,1.2,14), bodyMat); nose.rotation.x = Math.PI; nose.position.set(0,0.95,3.5); g.add(nose);
     return g;
   }
-
   function makeTailCar(primary=0xff8a00, trim=0x333333){
     const g = new THREE.Group();
     const body = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.5,4.2),
@@ -470,8 +484,8 @@
     cars.push(follower);
   }
 
-  /* ---------- Pickups: Fuel cells ---------- */
-  const pickups = []; // {mesh, baseY, phase}
+  /* ---------- Pickups (fuel cells) ---------- */
+  const pickups = [];
   function createFuelCell(){
     const group = new THREE.Group();
     const core = new THREE.Mesh(
@@ -498,19 +512,13 @@
   }
   for(let i=0;i<6;i++) spawnPickup();
 
-  /* ---------- Obstacles: Track barriers ---------- */
-  const obstacles = []; // { mesh, base, mode, amp, freq, phase, dir }
+  /* ---------- Obstacles: barriers ---------- */
+  const obstacles = [];
   const barrelMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    map: (()=>{ // red/white horizontal stripes
-      const c = document.createElement('canvas'); c.width=128; c.height=64;
-      const ctx = c.getContext('2d');
-      for(let i=0;i<6;i++){
-        ctx.fillStyle = (i%2===0)?'#d10':'#fff';
-        ctx.fillRect(0,i*(c.height/6),c.width,(c.height/6));
-      }
-      const t = new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t;
-    })(),
+    map: (()=>{ const c=document.createElement('canvas'); c.width=128; c.height=64;
+      const ctx=c.getContext('2d'); for(let i=0;i<6;i++){ ctx.fillStyle=(i%2===0)?'#d10':'#fff'; ctx.fillRect(0,i*(c.height/6),c.width,(c.height/6)); }
+      const t = new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; return t; })(),
     metalness: 0.2, roughness: 0.7
   });
   function makeBarrier(){
@@ -544,7 +552,7 @@
   }
   spawnObstacles();
 
-  /* ---------- Input ---------- */
+  /* ---------- INPUT ---------- */
   const keys = {};
   window.addEventListener('keydown', e=> keys[e.key.toLowerCase()] = true);
   window.addEventListener('keyup',   e=> keys[e.key.toLowerCase()] = false);
@@ -586,6 +594,71 @@
     if (car.boost.active && t > car.boost.timer) car.boost.active = false;
   }
 
+  /* ---------- FIRST-PERSON KNIFE (inspired karambit) ---------- */
+  // Note: custom, original geometry inspired by a curved karambit shape (not using any game assets).
+  const knife = { group:null, inspecting:false, t:0, dur:1400 };
+  function makeKarambit(){
+    const g = new THREE.Group();
+
+    // Curved blade: torus segment scaled + sharpened tip cone
+    const bladeMat = new THREE.MeshStandardMaterial({color:0xdedede, metalness:0.9, roughness:0.2});
+    const blade = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.08, 16, 64, Math.PI*1.1), bladeMat);
+    blade.rotation.x = Math.PI/2;
+    blade.rotation.z = Math.PI/6;
+    blade.position.set(0.1, -0.05, 0.1);
+    g.add(blade);
+
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.22, 16), bladeMat);
+    tip.rotation.x = -Math.PI/2;
+    tip.position.set(0.75, 0.02, 0.22);
+    g.add(tip);
+
+    // Handle with ring
+    const hMat = new THREE.MeshStandardMaterial({color:0x111217, metalness:0.6, roughness:0.6});
+    const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.55, 8, 16), hMat);
+    handle.rotation.z = Math.PI/6;
+    handle.position.set(-0.35, -0.02, -0.05);
+    g.add(handle);
+
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.045, 14, 24), new THREE.MeshStandardMaterial({color:0xf1c40f, metalness:0.7, roughness:0.35}));
+    ring.rotation.x = Math.PI/2;
+    ring.position.set(-0.58, 0.02, -0.08);
+    g.add(ring);
+
+    // Small accents
+    const inlay = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.02,0.28), new THREE.MeshStandardMaterial({color:0xffdf80, metalness:0.8, roughness:0.4}));
+    inlay.rotation.z = Math.PI/6;
+    inlay.position.set(-0.28, 0.06, -0.05);
+    g.add(inlay);
+
+    return g;
+  }
+  function addKnifeToCamera(){
+    knife.group = makeKarambit();
+    camera.add(knife.group);
+    // Position in view (bottom-right)
+    knife.group.position.set(0.6, -0.4, -1.0);
+    knife.group.rotation.set(-0.2, 0.6, 0.3);
+    scene.add(camera);
+  }
+  function startInspect(){
+    if (!knife.group || knife.inspecting) return;
+    knife.inspecting = true; knife.t = 0;
+  }
+  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f') startInspect(); });
+
+  function updateInspect(dt){
+    if (!knife.inspecting || !knife.group) return;
+    knife.t += dt*1000;
+    const p = Math.min(1, knife.t/knife.dur);              // 0..1
+    const easeOut = 1 - Math.pow(1-p, 3);
+    // Animate a flourish spin + bob
+    knife.group.rotation.y = 0.6 + Math.sin(easeOut*Math.PI*2)*1.2;
+    knife.group.rotation.x = -0.2 + Math.sin(easeOut*Math.PI*2)*0.25;
+    knife.group.position.y = -0.4 + Math.sin(easeOut*Math.PI*2)*0.08;
+    if (p >= 1){ knife.inspecting = false; }               // end
+  }
+
   /* ========= Loop ========= */
   let lastTime = performance.now();
   const sessionStart = performance.now();
@@ -605,7 +678,6 @@
     const dt = Math.min(dtRaw, 0.05);
     lastTime = now;
 
-    // Update timer UI
     if (alive){
       const elapsed = now - gameStartMs;
       timerEl.textContent = fmtTime(elapsed);
@@ -673,7 +745,7 @@
       }
 
       // moving barriers start after score >= 8
-      const moveFactor = Math.min(1, Math.max(0, (score - 8) / 12)); // 0..1
+      const moveFactor = Math.min(1, Math.max(0, (score - 8) / 12));
       if (moveFactor > 0){
         for (const o of obstacles){
           const amp = o.amp * moveFactor;
@@ -698,15 +770,13 @@
         }
       }
 
-      // boundary (track outer edge)
-      if (player.position.length() > ARENA_RADIUS-1.5){
-        doGameOver();
-      }
-      // optional: prevent going inside the inner grass hole
-      if (player.position.length() < trackInner+0.5){
+      // boundaries
+      if (player.position.length() > ARENA_RADIUS-1.5 || player.position.length() < trackInner+0.5){
         doGameOver();
       }
     }
+
+    updateInspect(dt);
 
     // camera follow
     const camOffset = new THREE.Vector3(0, 15, -30).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
@@ -739,6 +809,7 @@
     timerEl.textContent = '00:00';
     chatBox.style.display = 'flex';
     startOverlay.style.display = 'none';
+    if (!knife.group) addKnifeToCamera();
   });
   nameInput.addEventListener('keydown', e=>{ if (e.key==='Enter') startBtn.click(); });
 
@@ -746,17 +817,15 @@
     const nm = (restartNameInput.value || '').trim().substring(0,20);
     playerName = nm || playerName || 'Player';
     localStorage.setItem('f1snake_name', playerName);
-    // reset game state
     score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false; alive = true;
     gameStartMs = performance.now();
     timerEl.textContent = '00:00';
-    // back to only head
     while (cars.length > 1){ const seg = cars.pop(); scene.remove(seg.mesh); }
     cars[0].position.set(0,0,0); cars[0].rotationY = 0;
     cars[0].mesh.position.set(0,0,0); cars[0].mesh.rotation.y = 0;
-    // reset obstacles to base
     for (const o of obstacles){ o.mesh.position.copy(o.base); }
     restartOverlay.style.display = 'none';
+    if (!knife.group) addKnifeToCamera();
   });
 
   // Start listeners/render
@@ -767,6 +836,33 @@
     camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
   });
+
+  /* ========= Instagram Reels (embed under leaderboard) ========= */
+  // Replace with your own reel URLs (public, embedding allowed).
+  const reelsUrls = [
+    // Example public reel URLs (replace these)
+    "https://www.instagram.com/reel/CwLQb3xv123/",
+    "https://www.instagram.com/reel/C1Sample234/",
+    "https://www.instagram.com/reel/C9Another567/"
+  ];
+  const reelsContainer = document.getElementById('reelsContainer');
+
+  function renderReels(urls){
+    reelsContainer.innerHTML = '';
+    urls.forEach(url=>{
+      const bq = document.createElement('blockquote');
+      bq.className = 'instagram-media';
+      bq.dataset.instgrmPermalink = url;
+      bq.dataset.instgrmVersion = '14';
+      bq.style.margin = '0 0 12px';
+      reelsContainer.appendChild(bq);
+    });
+    if (window.instgrm && window.instgrm.Embeds) {
+      window.instgrm.Embeds.process();
+    }
+  }
+  // process again if the script loads later
+  window.addEventListener('load', ()=> renderReels(reelsUrls));
 })();
 </script>
 </body>
