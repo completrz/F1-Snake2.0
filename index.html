@@ -29,7 +29,7 @@
   #scoreRow { font-weight: 800; font-size: 18px; display:flex; justify-content:space-between; gap:8px; align-items:center; }
   #timer { font-variant-numeric: tabular-nums; opacity:.95; }
   #rankNow { font-size:12px; opacity:.95; display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;}
-  #rankNow img{ width:18px; height:18px; vertical-align:middle; border-radius:4px; }
+  #rankNow img{ width:18px; height:18px; vertical-align:middle; border-radius:4px; background:#1a1f27; }
   #rankText { font-weight:700; }
   #rrText { padding:2px 6px; border-radius:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); font-variant-numeric:tabular-nums; }
   #hint   { margin-top: 6px; font-size: 12px; opacity: .88; line-height: 1.35; }
@@ -288,12 +288,11 @@
   const rankUpOverlay = document.getElementById('rankUpOverlay');
   const rankUpBadgeOld = document.getElementById('rankUpBadgeOld');
   const rankUpBadgeNew = document.getElementById('rankUpBadgeNew');
-  const rankUpText = document.getElementById('rankUpText');
 
   const xpBadge = document.getElementById('xpBadge');
   const xpTime = document.getElementById('xpTime');
 
-  /* ========= Rank icons (Valorant tracker) + fallback ========= */
+  /* ========= Ranks ========= */
   const RANKS = [
     'Iron 1','Iron 2','Iron 3',
     'Bronze 1','Bronze 2','Bronze 3',
@@ -307,6 +306,7 @@
   ];
   const RADIANT_INDEX = RANKS.length - 1;
 
+  // External Valorant rank icon URLs (may fail); we'll auto-fallback to SVGs on error
   const rankIconUrl = {
     "Iron 1":"https://tracker.gg/valorant/db/images/tiers/1.png",
     "Iron 2":"https://tracker.gg/valorant/db/images/tiers/2.png",
@@ -334,10 +334,29 @@
     "Immortal 3":"https://tracker.gg/valorant/db/images/tiers/24.png",
     "Radiant":"https://tracker.gg/valorant/db/images/tiers/27.png"
   };
+
+  function rankGroup(idx){
+    if (idx === RADIANT_INDEX) return 'Radiant';
+    const groups = ['Iron','Bronze','Silver','Gold','Platinum','Diamond','Ascendant','Immortal'];
+    return groups[Math.floor(idx/3)] || 'Radiant';
+  }
+  function rankColor(idx){
+    const g = rankGroup(idx);
+    switch(g){
+      case 'Iron': return '#8c8c8c';
+      case 'Bronze': return '#b88650';
+      case 'Silver': return '#b9c3cf';
+      case 'Gold': return '#e7c14c';
+      case 'Platinum': return '#3dd4c6';
+      case 'Diamond': return '#66a5ff';
+      case 'Ascendant': return '#4bd37d';
+      case 'Immortal': return '#c15cff';
+      case 'Radiant': return '#ffe75e';
+      default: return '#999';
+    }
+  }
   function rankBadgeDataURI(idx){
-    const colMap = ['#8c8c8c','#b88650','#b9c3cf','#e7c14c','#3dd4c6','#66a5ff','#4bd37d','#c15cff','#ffe75e'];
-    const group = (idx===RADIANT_INDEX)?8:Math.floor(idx/3);
-    const col = colMap[group]||'#999';
+    const col = rankColor(idx);
     const svg =
 `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 18 18">
   <defs>
@@ -350,9 +369,12 @@
 </svg>`;
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
   }
-  function getRankIcon(idx){
+  function setRankIcon(imgEl, idx){
     const name = RANKS[idx] || 'Iron 1';
-    return rankIconUrl[name] || rankBadgeDataURI(idx);
+    const url = rankIconUrl[name];
+    const fallback = rankBadgeDataURI(idx);
+    imgEl.onerror = () => { imgEl.onerror = null; imgEl.src = fallback; };
+    imgEl.src = url || fallback;
   }
 
   /* ========= Helpers ========= */
@@ -402,10 +424,17 @@
     delta = Math.max(-45, Math.min(70, delta));
     return delta;
   }
+  function applyRankTint(idx){
+    const col = rankColor(idx);
+    if (cars[0] && cars[0].mesh && cars[0].mesh.userData && cars[0].mesh.userData.bodyMat){
+      cars[0].mesh.userData.bodyMat.color.set(col);
+    }
+  }
   function setHudRank(idx, rrVal){
-    rankNowIcon.src = getRankIcon(idx);
+    setRankIcon(rankNowIcon, idx);
     rankText.textContent = `Rank: ${RANKS[idx] || 'Unrated'}`;
     rrText.textContent = `RR: ${Math.max(0, Math.min(100, Math.round(rrVal ?? 0)))}`;
+    applyRankTint(idx); // color the player's car by rank
   }
   async function applyMatchResultAndSave(name, scoreVal, elapsedMs){
     const id = sanitizeId(name);
@@ -423,7 +452,6 @@
     if (idx === 0 && rr < 0) rr = 0;
     if (idx === RADIANT_INDEX && rr > 100) rr = 100;
 
-    // keep highest score
     await db.runTransaction(async tx=>{
       const snap = await tx.get(ref);
       const cur = snap.exists ? snap.data() : null;
@@ -435,7 +463,7 @@
   }
   function totalRR(idx, rr){ return idx*100 + rr; }
 
-  /* ========= Leaderboard (players collection, no duplicates) ========= */
+  /* ========= Leaderboard ========= */
   function startLeaderboardListener(){
     db.collection('players').orderBy('score','desc').limit(10).onSnapshot(snap=>{
       const items = snap.docs.map(d=>d.data());
@@ -454,7 +482,7 @@
         const rankSpan = document.createElement('span');
         rankSpan.className = 'rank'; rankSpan.textContent = pos;
         const img = document.createElement('img');
-        img.className = 'rankIcon'; img.src = getRankIcon(it.rankIndex||0); img.alt = '';
+        img.className = 'rankIcon'; setRankIcon(img, it.rankIndex||0);
         const nameSpan = document.createElement('span');
         nameSpan.className = 'name'; nameSpan.textContent = it.name || 'Player';
         left.appendChild(rankSpan); left.appendChild(img); left.appendChild(nameSpan);
@@ -473,9 +501,9 @@
       const arr = []; snap.forEach(d=>arr.push(d.data())); arr.reverse();
       chatMessagesEl.innerHTML = '';
       arr.forEach(m=>{
-        const t = m.timestamp ? new Date(m.timestamp.seconds*1000).toLocaleTimeString() : '';
+        const time = m.timestamp ? new Date(m.timestamp.seconds*1000).toLocaleTimeString() : '';
         const div = document.createElement('div');
-        div.textContent = `[${t}] ${m.name||'Player'}: ${m.message||''}`;
+        div.textContent = `[${time}] ${m.name||'Player'}: ${m.message||''}`;
         chatMessagesEl.appendChild(div);
       });
       chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
@@ -488,7 +516,7 @@
       message: t,
       timestamp: firebase.firestore.FieldValue.serverTimestamp()
     });
-    // Trim > 50 (best-effort)
+    // Trim > 50
     const all = await db.collection('chat').orderBy('timestamp','asc').get();
     if (all.size > CHAT_MAX){
       const toDelete = all.docs.slice(0, all.size-CHAT_MAX);
@@ -508,7 +536,7 @@
   const BOOST_MULTIPLIER = 2.4;
   const BOOST_DURATION = 2000;
   const BOOST_COOLDOWN = 4000;
-  const OBSTACLE_COUNT = 18; // more, middle-heavy
+  const OBSTACLE_COUNT = 18;
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0x9cc6ff, 0.0009);
@@ -604,6 +632,7 @@
   /* ---------- Car Models ---------- */
   function makeHeadCar(primary=0xff2d55, accent=0xffffff){
     const g = new THREE.Group();
+
     const wheelMat = new THREE.MeshStandardMaterial({color:0x111111, metalness:.3, roughness:.6});
     const wheelGeo = new THREE.CylinderGeometry(0.6,0.6,0.4,16);
     const wheels = [0,1,2,3].map(()=>new THREE.Mesh(wheelGeo, wheelMat));
@@ -612,18 +641,25 @@
     wheels[1].position.set( 1.2, 0.6,  2.2);
     wheels[2].position.set(-1.2, 0.6, -2.0);
     wheels[3].position.set( 1.2, 0.6, -2.0);
+
     const bodyMat = new THREE.MeshStandardMaterial({color:primary, metalness:.5, roughness:.3});
     const body = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.6,5.6), bodyMat);
     body.position.set(0, 0.9, 0); body.castShadow = true; g.add(body);
-    const pod = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,3.6), bodyMat);
+
+    const podMat = bodyMat;
+    const pod = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,3.6), podMat);
     const pod2 = pod.clone(); pod.position.set(-1.4, 0.85, 0); pod2.position.set(1.4, 0.85, 0); g.add(pod); g.add(pod2);
-    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(1.0,0.5,1.2),
-      new THREE.MeshStandardMaterial({color:accent, metalness:.2, roughness:.6}));
+
+    const cockpitMat = new THREE.MeshStandardMaterial({color:accent, metalness:.2, roughness:.6});
+    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(1.0,0.5,1.2), cockpitMat);
     cockpit.position.set(0, 1.25, 1.0); cockpit.castShadow = true; g.add(cockpit);
+
     const fwing = new THREE.Mesh(new THREE.BoxGeometry(3.2,0.15,0.9), bodyMat); fwing.position.set(0, 0.75, 3.1); g.add(fwing);
     const rwing = new THREE.Mesh(new THREE.BoxGeometry(2.4,0.15,0.6), bodyMat); rwing.position.set(0, 1.15, -2.8); g.add(rwing);
     const rwingVert = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.7,0.05), bodyMat); rwingVert.position.set(0, 1.0, -2.6); g.add(rwingVert);
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5,1.2,14), bodyMat); nose.rotation.x = Math.PI; nose.position.set(0,0.95,3.5); g.add(nose);
+
+    g.userData.bodyMat = bodyMat; // <-- we will tint this by rank
     return g;
   }
   function makeTailCar(primary=0xff8a00, trim=0x333333){
@@ -677,8 +713,7 @@
       new THREE.IcosahedronGeometry(1.0, 0),
       new THREE.MeshStandardMaterial({color:0x00ffae, emissive:0x00ffae, emissiveIntensity:0.6, roughness:0.3, metalness:0.2})
     );
-    core.position.y = 1.0;
-    group.add(core);
+    core.position.y = 1.0; group.add(core);
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.2, 0.06, 12, 40),
       new THREE.MeshBasicMaterial({color:0x66ffd9, transparent:true, opacity:0.6})
@@ -703,8 +738,9 @@
   }
   for(let i=0;i<12;i++) spawnPickup();
 
-  /* ---------- 2x XP Gems (rare ~1/8 overall) ---------- */
+  /* ---------- 2x XP Gems (rare) ---------- */
   const xpGems = [];
+  const XP_DURATION_MS = 15000;
   function makeGem(){
     const g = new THREE.Group();
     const core = new THREE.Mesh(
@@ -721,16 +757,16 @@
   }
   function trySpawnGem(){
     if (xpGems.length >= 2) return;
-    if (Math.random() < 0.125){ // ~1/8 attempt chance
+    if (Math.random() < 0.125){
       const gem = makeGem();
-      const pos = randomPointInCircle(4, ARENA_RADIUS * 0.55); // middle-biased
+      const pos = randomPointInCircle(4, ARENA_RADIUS * 0.55);
       gem.position.copy(pos);
       scene.add(gem);
       xpGems.push({mesh:gem, phase:Math.random()*Math.PI*2});
     }
   }
 
-  /* ---------- Obstacles (more in middle) ---------- */
+  /* ---------- Obstacles (middle-heavy, some motion after score) ---------- */
   const obstacles = [];
   const barrelMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -902,7 +938,7 @@
   }
   function canDie(){ return performance.now() >= spawnGraceUntil; }
 
-  /* ========= Game Loop ========= */
+  /* ========= Loop ========= */
   let lastTime = performance.now();
   const sessionStart = performance.now();
 
@@ -931,7 +967,7 @@
       xpMultActive = false; xpBadge.style.display = 'none';
     }
 
-    // Maintain rare gems
+    // Rare gems
     trySpawnGem();
 
     // Speed scales with score
@@ -1061,9 +1097,8 @@
   function showRankUpAnimation(oldIdx, newIdx, promos){
     const rect = rankNowIcon.getBoundingClientRect();
     spawnBursts(rect.left + rect.width/2, rect.top + rect.height/2, 36 + (promos||1)*12);
-    rankUpBadgeOld.src = getRankIcon(oldIdx);
-    rankUpBadgeNew.src = getRankIcon(newIdx);
-    rankUpText.textContent = 'PROMOTED!';
+    setRankIcon(rankUpBadgeOld, oldIdx);
+    setRankIcon(rankUpBadgeNew, newIdx);
     rankUpOverlay.style.display = 'grid';
     setTimeout(()=>{ rankUpOverlay.style.display='none'; }, 1800);
   }
@@ -1163,7 +1198,7 @@
     addKnifeToCamera();
   });
 
-  // Prime initial HUD rank
+  // Prime initial HUD rank (also tints car)
   (async () => {
     if (playerName){
       await primeRankSnapshotAndHUD();
