@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>F1 Snake with On-Screen Leaderboard</title>
+<title>F1 Snake with Live Leaderboard</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <style>
   html, body {
@@ -17,46 +17,54 @@
   }
   #leaderboard {
     position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
+    top: 12px; right: 12px;
     background: rgba(0,0,0,0.85);
     color: #0ff;
-    padding: 20px 30px;
+    padding: 15px 20px;
     border-radius: 12px;
-    font-size: 1.1rem;
-    max-width: 300px;
-    max-height: 70vh;
+    font-size: 1rem;
+    max-width: 200px;
+    max-height: 300px;
     overflow-y: auto;
-    display: none;
     z-index: 20;
-    box-shadow: 0 0 20px #0ff;
+    box-shadow: 0 0 12px #0ff;
   }
   #leaderboard h2 {
     margin-top: 0;
     text-align: center;
     color: #0ff;
     font-weight: bold;
+    font-size: 1.3rem;
   }
   #leaderboard ul {
     list-style: none;
     padding-left: 0;
+    margin: 0;
   }
   #leaderboard li {
     margin: 6px 0;
     padding: 4px 0;
     border-bottom: 1px solid #0ff33aa;
   }
-  #leaderboard button {
-    margin-top: 15px;
-    display: block;
-    margin-left: auto;
-    margin-right: auto;
-    background: #0ff;
-    color: #000;
-    border: none;
+  #submitNameContainer {
+    margin-top: 10px;
+    text-align: center;
+  }
+  #playerNameInput {
+    width: 90%;
+    padding: 6px;
     border-radius: 6px;
-    padding: 6px 12px;
+    border: none;
+    font-size: 1rem;
+  }
+  #submitNameBtn {
+    margin-top: 6px;
+    background: #0ff;
+    border: none;
+    color: black;
     font-weight: bold;
+    padding: 6px 12px;
+    border-radius: 6px;
     cursor: pointer;
   }
 </style>
@@ -69,15 +77,17 @@
 </head>
 <body>
 <div id="ui">
-  Score: <span id="score">0</span>
-  <br />
+  Score: <span id="score">0</span><br/>
   Controls: A/D or ◀️/▶️ or touch left/right half, double tap or two-finger tap to boost
 </div>
 
 <div id="leaderboard">
-  <h2>🏆 Leaderboard 🏆</h2>
+  <h2>🏆 Leaderboard</h2>
   <ul id="leaderboard-list"></ul>
-  <button id="close-leaderboard">Close</button>
+  <div id="submitNameContainer">
+    <input id="playerNameInput" type="text" placeholder="Enter your name" maxlength="20" />
+    <button id="submitNameBtn">Submit Score</button>
+  </div>
 </div>
 
 <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
@@ -87,15 +97,14 @@
 
   // REPLACE these with your Firebase project config values
   const firebaseConfig = {
-    apiKey: "AIzaSyC5seSlgxk4mCRn4HKet4rHlzhQVVBxc-8",
-    authDomain: "f1-snake.firebaseapp.com",
-    projectId: "f1-snake",
-    storageBucket: "f1-snake.firebasestorage.app",
-    messagingSenderId: "575341092161",
-    appId: "1:575341092161:web:b9050e1df88c9e36de95c0"
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "SENDER_ID",
+    appId: "APP_ID"
   };
 
-  // Initialize Firebase
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
@@ -111,7 +120,7 @@
     }
   }
 
-  async function getTopScores(limit = 10) {
+  async function getTopScores(limit = 5) {
     try {
       const snapshot = await db.collection('leaderboard')
         .orderBy('score', 'desc')
@@ -266,7 +275,6 @@
   let score = 0;
   const scoreEl = document.getElementById('score');
   let alive = true;
-  let leaderboardSubmitted = false;
 
   function canBoost(car) {
     const now = performance.now();
@@ -287,36 +295,41 @@
   }
 
   // Leaderboard DOM refs
-  const leaderboardDiv = document.getElementById('leaderboard');
   const leaderboardList = document.getElementById('leaderboard-list');
-  const closeLeaderboardBtn = document.getElementById('close-leaderboard');
+  const playerNameInput = document.getElementById('playerNameInput');
+  const submitNameBtn = document.getElementById('submitNameBtn');
 
-  closeLeaderboardBtn.onclick = () => {
-    leaderboardDiv.style.display = 'none';
-    window.location.reload(); // reload page to restart game
+  async function updateLeaderboard() {
+    const topScores = await getTopScores();
+    leaderboardList.innerHTML = '';
+    topScores.forEach((entry, i) => {
+      const li = document.createElement('li');
+      li.textContent = `${i + 1}. ${entry.name}: ${entry.score}`;
+      leaderboardList.appendChild(li);
+    });
+  }
+
+  submitNameBtn.onclick = async () => {
+    const name = playerNameInput.value.trim().substring(0, 20) || 'Player';
+    await submitScore(name, score);
+    await updateLeaderboard();
+    playerNameInput.disabled = true;
+    submitNameBtn.disabled = true;
   };
+
+  // Auto update leaderboard every 10 seconds
+  setInterval(() => {
+    if (alive) updateLeaderboard();
+  }, 10000);
+
+  // Initial fetch
+  updateLeaderboard();
 
   let lastTime = performance.now();
 
-  async function gameOver() {
-    if (leaderboardSubmitted) return;
-    leaderboardSubmitted = true;
-
-    let playerName = prompt("Game Over! Enter your name for leaderboard:", "Player");
-    if (playerName) {
-      playerName = playerName.trim().substring(0, 20) || "Player";
-      await submitScore(playerName, score);
-      const topScores = await getTopScores();
-
-      leaderboardList.innerHTML = '';
-      topScores.forEach((entry, i) => {
-        const li = document.createElement('li');
-        li.textContent = `${i + 1}. ${entry.name}: ${entry.score}`;
-        leaderboardList.appendChild(li);
-      });
-
-      leaderboardDiv.style.display = 'block';
-    }
+  function gameOver() {
+    alive = false;
+    scoreEl.textContent = `Game Over! Final Score: ${score}`;
   }
 
   function animate() {
@@ -380,15 +393,11 @@
 
     for(const obs of obstacles){
       if(obs.position.distanceTo(player.position) < 4.5){
-        alive = false;
-        scoreEl.textContent = `Crashed into obstacle! Final Score: ${score}`;
         gameOver();
       }
     }
 
     if (player.position.length() > ARENA_RADIUS) {
-      alive = false;
-      scoreEl.textContent = `Hit the wall! Final Score: ${score}`;
       gameOver();
     }
 
