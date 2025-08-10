@@ -11,14 +11,20 @@
     touch-action: none;
   }
   #ui {
-    position: absolute; top: 12px; left: 12px; color: #fff; z-index: 20;
+    position: absolute; top: 12px; left: 12px; color: #fff; z-index: 30;
     background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 8px;
     user-select: none;
     max-width: 220px;
   }
+  #leaderboard {
+    margin-top: 10px;
+    font-size: 14px;
+    max-height: 250px;
+    overflow-y: auto;
+  }
   #chat {
     position: absolute;
-    top: 12px; right: 12px; bottom: 12px;
+    top: 12px; left: 250px; bottom: 12px;
     width: 280px;
     background: rgba(0,0,0,0.7);
     color: white;
@@ -98,6 +104,7 @@
 <body>
 <div id="ui">
   Score: <span id="score">0</span>
+  <div id="leaderboard">Loading leaderboard...</div>
   <br />
   Controls: A/D or ◀️/▶️ or touch left/right half, double tap or two-finger tap to boost
 </div>
@@ -136,7 +143,6 @@
   // --- Leaderboard functions ---
   async function submitScore(name, score) {
     try {
-      // Upsert logic: check if user exists and update or add new
       const snapshot = await db.collection('leaderboard')
         .where('name', '==', name)
         .limit(1)
@@ -170,6 +176,22 @@
     }
   }
 
+  // --- Leaderboard realtime update ---
+  const leaderboardEl = document.getElementById('leaderboard');
+  function startLeaderboardListener() {
+    db.collection('leaderboard')
+      .orderBy('score', 'desc')
+      .limit(10)
+      .onSnapshot(snapshot => {
+        let html = '<strong>🏆 Leaderboard 🏆</strong><br>';
+        snapshot.docs.forEach((doc, i) => {
+          const d = doc.data();
+          html += `${i+1}. ${d.name}: ${d.score}<br>`;
+        });
+        leaderboardEl.innerHTML = html;
+      });
+  }
+
   // --- Chat setup ---
   const CHAT_MAX_MESSAGES = 50;
   let playerName = "";
@@ -177,7 +199,6 @@
   const chatInputEl = document.getElementById('chatInput');
   const chatContainerEl = document.getElementById('chat');
 
-  // Listen to latest 50 messages, order by timestamp ascending (old to new)
   let chatUnsubscribe = null;
   function startChatListener() {
     chatUnsubscribe = db.collection('chat')
@@ -188,7 +209,6 @@
         snapshot.docs.forEach(doc => {
           msgs.push(doc.data());
         });
-        // We got newest first, reverse to oldest first for display
         msgs.reverse();
         chatMessagesEl.innerHTML = "";
         msgs.forEach(m => {
@@ -197,7 +217,6 @@
           div.textContent = `[${timeStr}] ${m.name}: ${m.message}`;
           chatMessagesEl.appendChild(div);
         });
-        // Scroll to bottom
         chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
       });
   }
@@ -210,7 +229,6 @@
         message: text.trim(),
         timestamp: firebase.firestore.FieldValue.serverTimestamp()
       });
-      // After sending, check total messages and delete oldest if > max
       const snapshot = await db.collection('chat')
         .orderBy('timestamp', 'asc')
         .get();
@@ -395,13 +413,6 @@
       playerNamePrompt = playerNamePrompt.trim().substring(0, 20) || "Player";
       playerName = playerNamePrompt; // update name to latest
       await submitScore(playerName, score);
-      const topScores = await getTopScores();
-
-      let leaderboardStr = '🏆 Leaderboard 🏆\n\n';
-      topScores.forEach((entry, i) => {
-        leaderboardStr += `${i + 1}. ${entry.name}: ${entry.score}\n`;
-      });
-      alert(leaderboardStr);
     }
   }
 
@@ -423,6 +434,7 @@
     chatDiv.style.display = 'flex';
     animate();
     startChatListener();
+    startLeaderboardListener();
   };
 
   nameInput.addEventListener('keydown', (e) => {
