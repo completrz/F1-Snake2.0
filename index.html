@@ -2,147 +2,187 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>F1 Snake with Leaderboard + Chat</title>
+<title>F1 Snake — Leaderboard + Chat</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <style>
+  :root{
+    --glass: rgba(0,0,0,0.35);
+    --panel: rgba(0,0,0,0.75);
+    --accent: #00e5ff;
+    --danger: #ff3b30;
+  }
   html, body {
-    margin: 0; height: 100%; overflow: hidden; background: #111;
-    font-family: sans-serif;
-    touch-action: none;
+    margin: 0; height: 100%; overflow: hidden; background: #0b0f14;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     color: #fff;
+    touch-action: none;
   }
-  #ui {
-    position: absolute; top: 12px; left: 12px; color: #fff; z-index: 30;
-    background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 8px;
-    user-select: none;
-    max-width: 220px;
+
+  /* HUD (left) */
+  #hud {
+    position: absolute; top: 14px; left: 14px; z-index: 30;
+    background: var(--glass); padding: 10px 12px; border-radius: 12px;
+    backdrop-filter: blur(6px);
+    width: 260px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
   }
-  #instructions {
-    margin-top: 10px;
-    font-size: 14px;
-  }
+  #scoreRow { font-weight: 700; font-size: 18px; }
+  #hint   { margin-top: 6px; font-size: 12px; opacity: .85; line-height: 1.35; }
+
+  /* Chat (square, under instructions, left) */
   #chat {
     margin-top: 10px;
-    width: 220px;
-    height: 220px;
-    background: rgba(0,0,0,0.7);
-    border-radius: 8px;
-    display: flex;
+    width: 260px; height: 260px;
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    display: none;            /* shown after name entered */
     flex-direction: column;
-    font-size: 14px;
     overflow: hidden;
-    user-select: text;
+  }
+  #chatHeader{
+    padding: 8px 10px; font-size: 12px; letter-spacing:.2px; opacity:.9;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
   }
   #chatMessages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px;
-    line-height: 1.3;
+    flex: 1; overflow-y: auto; padding: 8px 10px; line-height: 1.35; font-size: 13px;
   }
   #chatInput {
-    border: none;
-    padding: 8px 10px;
-    font-size: 14px;
-    outline: none;
-    border-top: 1px solid #333;
-    background: #222;
-    color: white;
+    border: none; outline: none; padding: 10px;
+    background: #141920; color: #fff; font-size: 14px;
+    border-top: 1px solid rgba(255,255,255,0.08);
   }
-  #chatInput::placeholder {
-    color: #888;
-  }
+  #chatInput::placeholder{ color:#8aa0b4; }
+
+  /* Leaderboard (top-right, “nice” card) */
   #leaderboard {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    max-width: 220px;
-    background: rgba(0,0,0,0.25);
-    padding: 8px 12px;
-    border-radius: 8px;
-    font-size: 14px;
-    max-height: 320px;
-    overflow-y: auto;
-    user-select: none;
-    z-index: 30;
+    position: absolute; top: 14px; right: 14px; z-index: 30;
+    width: 280px; max-height: 340px; overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px; box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+    backdrop-filter: blur(6px);
   }
-  #namePromptOverlay {
-    position: fixed;
-    top:0; left:0; right:0; bottom:0;
-    background: rgba(0,0,0,0.85);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 50;
+  #lbHeader{
+    padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.08);
+    display:flex; align-items:center; gap:8px;
   }
-  #namePromptBox {
-    background: #222;
-    padding: 20px 30px;
-    border-radius: 10px;
-    color: white;
-    font-size: 18px;
-    max-width: 90vw;
+  #lbHeader .dot{ width:8px; height:8px; border-radius:50%; background: var(--accent); box-shadow:0 0 10px var(--accent); }
+  #lbHeader h3{ margin:0; font-size: 14px; letter-spacing:.3px; font-weight: 700; }
+  #lbList{ list-style:none; margin:0; padding: 8px 10px 12px 10px; }
+  #lbList li{
+    display:flex; justify-content: space-between; align-items:center;
+    padding: 8px 8px; margin: 4px 0;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; font-size: 14px;
+  }
+  #lbList li .rank{
+    width: 22px; height: 22px; border-radius: 6px; display:flex; align-items:center; justify-content:center;
+    background: rgba(255,255,255,0.08); font-size: 12px; margin-right: 8px;
+  }
+  #lbList li .name{ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lbList li .score{ font-weight: 700; color: #b7f; }
+
+  /* Overlays (start/restart, with prefilled name) */
+  .overlay {
+    position: fixed; inset: 0; display: none; place-items: center; z-index: 50;
+    background: radial-gradient(60% 60% at 50% 50%, rgba(0,229,255,0.08), rgba(0,0,0,0.9));
+    animation: fadeIn .25s ease-out both;
+  }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  .panel {
+    width: min(560px, 92vw);
+    background: rgba(10,14,20,.85);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    padding: 22px 22px 18px;
     text-align: center;
-    box-shadow: 0 0 15px #0af;
+    backdrop-filter: blur(10px);
   }
-  #nameInput {
-    width: 100%;
-    padding: 8px 10px;
-    font-size: 16px;
-    margin-top: 12px;
-    border-radius: 6px;
-    border: none;
-    outline: none;
+  .title {
+    font-weight: 800; font-size: 28px; letter-spacing:.3px; margin: 4px 0 6px;
   }
-  #startButton {
-    margin-top: 15px;
-    padding: 10px 18px;
-    font-size: 16px;
-    background: #0af;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    box-shadow: 0 0 8px #0af;
+  .subtitle { opacity:.85; font-size: 14px; margin-bottom: 14px; }
+  .inputRow { display:flex; gap:10px; justify-content:center; margin-top: 8px; }
+  .textInput {
+    width: 260px; padding: 10px 12px; border-radius: 10px; border:1px solid rgba(255,255,255,.12);
+    outline:none; background:#0f1620; color:#fff; font-size:15px;
   }
-  #startButton:hover {
-    background: #08c;
+  .btn {
+    padding: 10px 16px; border-radius: 10px; border: none; cursor: pointer;
+    background: linear-gradient(90deg, #00c6ff, #0072ff); color:#001318; font-weight: 800;
+    text-transform: uppercase; letter-spacing:.4px;
+    box-shadow: 0 10px 24px rgba(0,114,255,.35);
+  }
+  .btn:hover{ filter: brightness(1.07); }
+  .small { font-size:12px; opacity:.8; margin-top:10px; }
+
+  /* Final score badge on restart screen */
+  .scoreBadge{
+    display:inline-block; padding: 6px 10px; border-radius: 999px;
+    background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
+    margin-bottom: 8px; font-weight:700;
   }
 </style>
 
-<!-- Firebase App (the core Firebase SDK) -->
+<!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
-<!-- Firestore SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
-
 </head>
 <body>
 
-<div id="ui">
-  Score: <span id="score">0</span>
-  <div id="instructions">
-    Controls: A/D or ◀️/▶️ or touch left/right half, double tap or two-finger tap to boost
-  </div>
+<!-- HUD (score + instructions + chat square on the left) -->
+<div id="hud">
+  <div id="scoreRow">Score: <span id="score">0</span></div>
+  <div id="hint">Controls: A/D or ◀️/▶️ • Touch left/right • Double-tap/2-finger tap = Boost</div>
 
-  <div id="chat" style="display:none;">
+  <div id="chat">
+    <div id="chatHeader">💬 Global Chat</div>
     <div id="chatMessages"></div>
-    <input id="chatInput" placeholder="Type message and press Enter" autocomplete="off" />
+    <input id="chatInput" placeholder="Type & press Enter" autocomplete="off" />
   </div>
 </div>
 
-<div id="leaderboard">Loading leaderboard...</div>
+<!-- Leaderboard (top-right) -->
+<div id="leaderboard">
+  <div id="lbHeader"><span class="dot"></span><h3>Top 10 — Global Leaderboard</h3></div>
+  <ul id="lbList"><li><span class="rank">–</span><span class="name">Loading…</span><span class="score">–</span></li></ul>
+</div>
 
-<div id="namePromptOverlay">
-  <div id="namePromptBox">
-    Enter your player name:<br/>
-    <input id="nameInput" maxlength="20" placeholder="Player name" autocomplete="off" />
-    <button id="startButton">Start Game</button>
+<!-- Start overlay -->
+<div id="startOverlay" class="overlay" style="display:grid;">
+  <div class="panel">
+    <div class="title">F1 Snake</div>
+    <div class="subtitle">Collect green cones to grow your train. Dodge red cubes. Boost wisely!</div>
+    <div class="inputRow">
+      <input id="nameInput" class="textInput" maxlength="20" placeholder="Player name" />
+      <button id="startBtn" class="btn">Start</button>
+    </div>
+    <div class="small">Tip: Your last name will be remembered.</div>
+  </div>
+</div>
+
+<!-- Restart overlay -->
+<div id="restartOverlay" class="overlay">
+  <div class="panel">
+    <div class="title">Game Over</div>
+    <div class="scoreBadge">Final Score: <span id="finalScore">0</span></div>
+    <div class="inputRow">
+      <input id="restartNameInput" class="textInput" maxlength="20" placeholder="Player name" />
+      <button id="restartBtn" class="btn">Restart</button>
+    </div>
+    <div class="small">Change your name or keep it the same.</div>
   </div>
 </div>
 
 <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
 <script>
 (() => {
-  // --- Firebase setup ---
+  /* =========================
+     Firebase (Firestore)
+  ========================== */
   const firebaseConfig = {
     apiKey: "AIzaSyC5seSlgxk4mCRn4HKet4rHlzhQVVBxc-8",
     authDomain: "f1-snake.firebaseapp.com",
@@ -151,408 +191,386 @@
     messagingSenderId: "575341092161",
     appId: "1:575341092161:web:b9050e1df88c9e36de95c0"
   };
-
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
-  // --- Leaderboard functions ---
-  async function submitScore(name, score) {
-    try {
-      const snapshot = await db.collection('leaderboard')
-        .where('name', '==', name)
-        .limit(1)
-        .get();
-      if (!snapshot.empty) {
-        const doc = snapshot.docs[0];
-        const existingScore = doc.data().score || 0;
-        if (score > existingScore) {
-          await doc.ref.update({score, timestamp: firebase.firestore.FieldValue.serverTimestamp()});
+  /* =========================
+     DOM refs
+  ========================== */
+  const startOverlay = document.getElementById('startOverlay');
+  const restartOverlay = document.getElementById('restartOverlay');
+  const nameInput = document.getElementById('nameInput');
+  const startBtn = document.getElementById('startBtn');
+  const restartNameInput = document.getElementById('restartNameInput');
+  const restartBtn = document.getElementById('restartBtn');
+  const scoreEl = document.getElementById('score');
+
+  const chatBox = document.getElementById('chat');
+  const chatMessagesEl = document.getElementById('chatMessages');
+  const chatInputEl = document.getElementById('chatInput');
+
+  const lbList = document.getElementById('lbList');
+
+  /* =========================
+     Player / state
+  ========================== */
+  let playerName = localStorage.getItem('f1snake_name') || '';
+  if (playerName) nameInput.value = playerName;
+
+  let alive = false;
+  let score = 0;
+  let leaderboardSubmitted = false;
+
+  /* =========================
+     Leaderboard (pretty, top-right)
+  ========================== */
+  function startLeaderboardListener(){
+    db.collection('leaderboard').orderBy('score','desc').limit(10).onSnapshot(snap=>{
+      lbList.innerHTML = '';
+      let rank = 1;
+      snap.forEach(doc=>{
+        const d = doc.data();
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="rank">${rank}</span>
+                        <span class="name">${(d.name||'Player')}</span>
+                        <span class="score">${d.score||0}</span>`;
+        lbList.appendChild(li);
+        rank++;
+      });
+      if (rank === 1){
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="rank">–</span>
+                        <span class="name">No scores yet</span>
+                        <span class="score">–</span>`;
+        lbList.appendChild(li);
+      }
+    });
+  }
+  startLeaderboardListener();
+
+  async function submitScore(name, scoreVal){
+    try{
+      const q = await db.collection('leaderboard').where('name','==',name).limit(1).get();
+      if (!q.empty){
+        const docRef = q.docs[0].ref;
+        const prev = q.docs[0].data().score || 0;
+        if (scoreVal > prev){
+          await docRef.update({score: scoreVal, timestamp: firebase.firestore.FieldValue.serverTimestamp()});
         }
       } else {
         await db.collection('leaderboard').add({
-          name, score,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          name, score: scoreVal, timestamp: firebase.firestore.FieldValue.serverTimestamp()
         });
       }
-    } catch(e) {
-      console.error('Error saving score:', e);
+    }catch(e){ console.error(e); }
+  }
+
+  /* =========================
+     Chat (left square, last 50)
+  ========================== */
+  const CHAT_MAX = 50;
+  function startChatListener(){
+    db.collection('chat').orderBy('timestamp','desc').limit(CHAT_MAX).onSnapshot(snap=>{
+      const arr = [];
+      snap.forEach(d=>arr.push(d.data()));
+      arr.reverse();
+      chatMessagesEl.innerHTML = '';
+      arr.forEach(m=>{
+        const time = m.timestamp ? new Date(m.timestamp.seconds*1000).toLocaleTimeString() : '';
+        const div = document.createElement('div');
+        div.textContent = `[${time}] ${m.name||'Player'}: ${m.message||''}`;
+        chatMessagesEl.appendChild(div);
+      });
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    });
+  }
+  async function sendMessage(text){
+    const t = (text||'').trim();
+    if (!t) return;
+    await db.collection('chat').add({
+      name: playerName || 'Player',
+      message: t,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    // Trim > 50
+    const all = await db.collection('chat').orderBy('timestamp','asc').get();
+    if (all.size > CHAT_MAX){
+      const toDelete = all.docs.slice(0, all.size-CHAT_MAX);
+      const batch = db.batch();
+      toDelete.forEach(doc=>batch.delete(doc.ref));
+      await batch.commit();
     }
   }
-  async function getTopScores(limit = 10) {
-    try {
-      const snapshot = await db.collection('leaderboard')
-        .orderBy('score', 'desc')
-        .limit(limit)
-        .get();
-      return snapshot.docs.map(doc => doc.data());
-    } catch(e) {
-      console.error('Error fetching leaderboard:', e);
-      return [];
+  chatInputEl.addEventListener('keydown', e=>{
+    if (e.key === 'Enter'){
+      e.preventDefault();
+      sendMessage(chatInputEl.value);
+      chatInputEl.value='';
     }
-  }
+  });
 
-  // --- Leaderboard realtime update ---
-  const leaderboardEl = document.getElementById('leaderboard');
-  function startLeaderboardListener() {
-    db.collection('leaderboard')
-      .orderBy('score', 'desc')
-      .limit(10)
-      .onSnapshot(snapshot => {
-        let html = '<strong>🏆 Leaderboard 🏆</strong><br>';
-        snapshot.docs.forEach((doc, i) => {
-          const d = doc.data();
-          html += `${i+1}. ${d.name}: ${d.score}<br>`;
-        });
-        leaderboardEl.innerHTML = html;
-      });
-  }
-
-  // --- Chat setup ---
-  const CHAT_MAX_MESSAGES = 50;
-  let playerName = "";
-  const chatMessagesEl = document.getElementById('chatMessages');
-  const chatInputEl = document.getElementById('chatInput');
-  const chatContainerEl = document.getElementById('chat');
-
-  let chatUnsubscribe = null;
-  function startChatListener() {
-    chatUnsubscribe = db.collection('chat')
-      .orderBy('timestamp', 'desc')
-      .limit(CHAT_MAX_MESSAGES)
-      .onSnapshot(snapshot => {
-        const msgs = [];
-        snapshot.docs.forEach(doc => {
-          msgs.push(doc.data());
-        });
-        msgs.reverse();
-        chatMessagesEl.innerHTML = "";
-        msgs.forEach(m => {
-          const div = document.createElement('div');
-          const timeStr = m.timestamp ? new Date(m.timestamp.seconds * 1000).toLocaleTimeString() : '';
-          div.textContent = `[${timeStr}] ${m.name}: ${m.message}`;
-          chatMessagesEl.appendChild(div);
-        });
-        chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-      });
-  }
-
-  async function sendMessage(text) {
-    if (!text.trim()) return;
-    try {
-      await db.collection('chat').add({
-        name: playerName,
-        message: text.trim(),
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      const snapshot = await db.collection('chat')
-        .orderBy('timestamp', 'asc')
-        .get();
-      if (snapshot.size > CHAT_MAX_MESSAGES) {
-        const toDelete = snapshot.docs.slice(0, snapshot.size - CHAT_MAX_MESSAGES);
-        const batch = db.batch();
-        toDelete.forEach(doc => batch.delete(doc.ref));
-        await batch.commit();
-      }
-    } catch(e) {
-      console.error('Error sending chat message:', e);
-    }
-  }
-
-  // --- Game code ---
+  /* =========================
+     THREE / Game
+  ========================== */
   const ARENA_RADIUS = 120;
   const SEGMENT_DISTANCE = 6;
   const BOOST_MULTIPLIER = 2.4;
   const BOOST_DURATION = 2000;
   const BOOST_COOLDOWN = 4000;
   const OBSTACLE_COUNT = 10;
-
   const isMobile = /Mobi|Android/i.test(navigator.userAgent);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x111111, 0.0025);
+  scene.fog = new THREE.FogExp2(0x0b0f14, 0.0025);
   const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.5, 1000);
   const renderer = new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(innerWidth, innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x1b2230, 1);
   scene.add(hemiLight);
-
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-  dirLight.position.set(50, 100, 50);
-  scene.add(dirLight);
+  dirLight.position.set(50, 100, 50); scene.add(dirLight);
 
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(ARENA_RADIUS, 64),
     new THREE.MeshStandardMaterial({color:0x0d3b66})
   );
-  ground.rotation.x = -Math.PI/2;
-  ground.receiveShadow = true;
-  scene.add(ground);
+  ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
 
-  function makeCar(color=0xff2d55) {
-    const group = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(3.4, 1.2, 7.6),
-      new THREE.MeshStandardMaterial({color})
-    );
-    body.position.y = 0.6;
-    group.add(body);
-    return group;
+  function makeCar(color=0xff2d55){
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.2, 7.6), new THREE.MeshStandardMaterial({color}));
+    body.position.y = 0.6; g.add(body);
+    return g;
   }
 
   const cars = [];
   cars.push({
-    position: new THREE.Vector3(0, 0, 0),
+    position: new THREE.Vector3(0,0,0),
     rotationY: 0,
     mesh: makeCar(0xff2d55),
-    boost: { active: false, cooldown: 0, timer: 0 }
+    boost: {active:false, cooldown:0, timer:0}
   });
   scene.add(cars[0].mesh);
-  cars[0].mesh.position.set(0, 0, 0);
+  cars[0].mesh.position.set(0,0,0);
 
-  function addFollower() {
-    const leader = cars[cars.length - 1];
+  function addFollower(){
+    const leader = cars[cars.length-1];
     const follower = {
       position: new THREE.Vector3().copy(leader.position),
       rotationY: leader.rotationY,
       mesh: makeCar(0xff8a00),
     };
-    const backOffset = new THREE.Vector3(0, 0, -SEGMENT_DISTANCE).applyAxisAngle(new THREE.Vector3(0,1,0), leader.rotationY);
-    follower.position.add(backOffset);
+    const back = new THREE.Vector3(0,0,-SEGMENT_DISTANCE).applyAxisAngle(new THREE.Vector3(0,1,0), leader.rotationY);
+    follower.position.add(back);
     scene.add(follower.mesh);
     cars.push(follower);
   }
 
   const pickups = [];
-  function spawnPickup() {
-    const r = THREE.MathUtils.randFloat(10, ARENA_RADIUS - 10);
-    const a = THREE.MathUtils.randFloat(0, Math.PI * 2);
-    const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const coneGeo = new THREE.ConeGeometry(1.2, 2.2, 10);
-    const coneMat = new THREE.MeshStandardMaterial({ color: 0x00ffae });
-    const mesh = new THREE.Mesh(coneGeo, coneMat);
-    mesh.position.set(x, 1.1, z);
-    mesh.rotation.x = Math.PI;
-    scene.add(mesh);
-    pickups.push(mesh);
+  function spawnPickup(){
+    const r = THREE.MathUtils.randFloat(10, ARENA_RADIUS-10);
+    const a = THREE.MathUtils.randFloat(0, Math.PI*2);
+    const x = Math.cos(a)*r, z = Math.sin(a)*r;
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.2,2.2,10), new THREE.MeshStandardMaterial({color:0x00ffae}));
+    cone.position.set(x,1.1,z); cone.rotation.x = Math.PI;
+    scene.add(cone); pickups.push(cone);
   }
-  for (let i = 0; i < 6; i++) spawnPickup();
+  for(let i=0;i<6;i++) spawnPickup();
 
   const obstacles = [];
-  function spawnObstacles() {
-    for(let i=0; i < OBSTACLE_COUNT; i++) {
-      const r = THREE.MathUtils.randFloat(15, ARENA_RADIUS - 15);
-      const a = THREE.MathUtils.randFloat(0, Math.PI * 2);
-      const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(6, 6, 6),
-        new THREE.MeshStandardMaterial({color: 0xaa0000})
-      );
-      mesh.position.set(x, 3, z);
-      scene.add(mesh);
-      obstacles.push(mesh);
+  function spawnObstacles(){
+    for(let i=0;i<OBSTACLE_COUNT;i++){
+      const r = THREE.MathUtils.randFloat(15, ARENA_RADIUS-15);
+      const a = THREE.MathUtils.randFloat(0, Math.PI*2);
+      const x = Math.cos(a)*r, z = Math.sin(a)*r;
+      const box = new THREE.Mesh(new THREE.BoxGeometry(6,6,6), new THREE.MeshStandardMaterial({color:0xaa0000}));
+      box.position.set(x,3,z); scene.add(box); obstacles.push(box);
     }
   }
   spawnObstacles();
 
   const keys = {};
-  window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
-  window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+  window.addEventListener('keydown', e=> keys[e.key.toLowerCase()] = true);
+  window.addEventListener('keyup',   e=> keys[e.key.toLowerCase()] = false);
 
-  let touchLeft = false;
-  let touchRight = false;
-  let lastTap = 0;
-
-  function handleTouchStart(e) {
+  let touchLeft=false, touchRight=false, lastTap=0;
+  function handleTouchStart(e){
     e.preventDefault();
-    if (e.touches.length === 1) {
-      const touchX = e.touches[0].clientX;
-      if (touchX < window.innerWidth / 2) {
-        touchLeft = true;
-      } else {
-        touchRight = true;
-      }
-    } else if (e.touches.length === 2) {
-      if (canBoost(cars[0])) {
-        startBoost(cars[0]);
-      }
-    }
-  }
-  function handleTouchEnd(e) {
-    e.preventDefault();
-    touchLeft = false;
-    touchRight = false;
-  }
-  function handleTap(e) {
-    const now = Date.now();
-    if (now - lastTap < 300) {
+    if (e.touches.length===1){
+      const x = e.touches[0].clientX;
+      (x < innerWidth/2) ? touchLeft=true : touchRight=true;
+    } else if (e.touches.length===2){
       if (canBoost(cars[0])) startBoost(cars[0]);
     }
+  }
+  function handleTouchEnd(e){ e.preventDefault(); touchLeft=false; touchRight=false; }
+  function handleTap(){
+    const now = Date.now();
+    if (now - lastTap < 300){ if (canBoost(cars[0])) startBoost(cars[0]); }
     lastTap = now;
   }
-  window.addEventListener('touchstart', handleTouchStart, { passive: false });
-  window.addEventListener('touchend', handleTouchEnd, { passive: false });
-  window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+  window.addEventListener('touchstart', handleTouchStart, {passive:false});
+  window.addEventListener('touchend',   handleTouchEnd,   {passive:false});
+  window.addEventListener('touchcancel',handleTouchEnd,   {passive:false});
   window.addEventListener('click', handleTap);
 
-  let score = 0;
-  const scoreEl = document.getElementById('score');
-  let alive = true;
-  let leaderboardSubmitted = false;
-
-  function canBoost(car) {
-    const now = performance.now();
-    if (car.boost.cooldown && now < car.boost.cooldown) return false;
+  function canBoost(car){
+    const t = performance.now();
+    if (car.boost.cooldown && t < car.boost.cooldown) return false;
     return true;
   }
-  function startBoost(car) {
-    const now = performance.now();
+  function startBoost(car){
+    const t = performance.now();
     car.boost.active = true;
-    car.boost.timer = now + BOOST_DURATION;
-    car.boost.cooldown = now + BOOST_DURATION + BOOST_COOLDOWN;
+    car.boost.timer = t + BOOST_DURATION;
+    car.boost.cooldown = t + BOOST_DURATION + BOOST_COOLDOWN;
   }
-  function updateBoost(car) {
-    const now = performance.now();
-    if (car.boost.active && now > car.boost.timer) {
-      car.boost.active = false;
-    }
+  function updateBoost(car){
+    const t = performance.now();
+    if (car.boost.active && t > car.boost.timer) car.boost.active = false;
   }
 
-  async function gameOver() {
-    if (leaderboardSubmitted) return;
-    leaderboardSubmitted = true;
-
-    let playerNamePrompt = prompt("Game Over! Enter your name for leaderboard:", playerName || "Player");
-    if (playerNamePrompt) {
-      playerNamePrompt = playerNamePrompt.trim().substring(0, 20) || "Player";
-      playerName = playerNamePrompt; // update name to latest
-      await submitScore(playerName, score);
-    }
-  }
-
-  // --- Player name prompt & start game ---
-  const namePromptOverlay = document.getElementById('namePromptOverlay');
-  const nameInput = document.getElementById('nameInput');
-  const startButton = document.getElementById('startButton');
-  const chatInput = document.getElementById('chatInput');
-  const chatDiv = document.getElementById('chat');
-
-  startButton.onclick = () => {
-    const val = nameInput.value.trim().substring(0, 20);
-    if (val.length === 0) {
-      alert("Please enter a player name.");
-      return;
-    }
-    playerName = val;
-    namePromptOverlay.style.display = 'none';
-    chatDiv.style.display = 'flex';
-    animate();
-    startChatListener();
-    startLeaderboardListener();
-  };
-
-  nameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') startButton.click();
-  });
-
-  chatInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      sendMessage(chatInput.value);
-      chatInput.value = '';
-    }
-  });
-
-  // --- Animation Loop ---
+  /* =========================
+     Game loop
+  ========================== */
   let lastTime = performance.now();
+  function animate(){
+    requestAnimationFrame(animate);
 
-  function animate() {
-    if (alive) requestAnimationFrame(animate);
     const now = performance.now();
-    const deltaRaw = (now - lastTime) / 1000;
-    const delta = Math.min(deltaRaw, 0.05);
+    const dtRaw = (now - lastTime)/1000;
+    const dt = Math.min(dtRaw, 0.05);
     lastTime = now;
 
-    if (!alive) {
-      renderer.render(scene, camera);
-      return;
-    }
+    // Render even if not alive (for overlay background)
     const player = cars[0];
 
+    // Movement
     const BASE_SPEED = isMobile ? 7 : 15;
     const ROTATION_SPEED = isMobile ? 2.5 : 3.5;
 
-    if (keys['a'] || keys['arrowleft'] || touchLeft) player.rotationY += ROTATION_SPEED * delta;
-    if (keys['d'] || keys['arrowright'] || touchRight) player.rotationY -= ROTATION_SPEED * delta;
+    if (alive){
+      if (keys['a'] || keys['arrowleft']  || touchLeft)  player.rotationY += ROTATION_SPEED * dt;
+      if (keys['d'] || keys['arrowright'] || touchRight) player.rotationY -= ROTATION_SPEED * dt;
 
-    if ((keys[' '] && canBoost(player)) || player.boost.active) {
-      if (keys[' '] && canBoost(player)) startBoost(player);
-    }
-    updateBoost(player);
-
-    const speed = BASE_SPEED * (player.boost.active ? BOOST_MULTIPLIER : 1);
-
-    const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotationY);
-    player.position.add(forward.multiplyScalar(speed * delta));
-
-    for (let i = 1; i < cars.length; i++) {
-      const leader = cars[i - 1];
-      const follower = cars[i];
-      const dir = new THREE.Vector3().subVectors(leader.position, follower.position);
-      const dist = dir.length();
-      if (dist > SEGMENT_DISTANCE) {
-        dir.normalize();
-        follower.position.add(dir.multiplyScalar(Math.min(dist - SEGMENT_DISTANCE, speed * delta * 1.5)));
+      if ((keys[' '] && canBoost(player)) || player.boost.active){
+        if (keys[' '] && canBoost(player)) startBoost(player);
       }
-      const targetRotation = Math.atan2(dir.x, dir.z);
-      follower.rotationY += (targetRotation - follower.rotationY) * 0.15;
-    }
+      updateBoost(player);
 
-    for (let i = 0; i < cars.length; i++) {
-      const c = cars[i];
-      c.mesh.position.copy(c.position).setY(0.6);
-      c.mesh.rotation.y = c.rotationY;
-    }
+      const speed = BASE_SPEED * (player.boost.active ? BOOST_MULTIPLIER : 1);
+      const fwd = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
+      player.position.add(fwd.multiplyScalar(speed * dt));
 
-    for (let i = pickups.length - 1; i >= 0; i--) {
-      if (pickups[i].position.distanceTo(player.position) < 3) {
-        scene.remove(pickups[i]);
-        pickups.splice(i, 1);
-        score++;
-        scoreEl.textContent = score;
-        addFollower();
-        spawnPickup();
+      // followers
+      for (let i=1;i<cars.length;i++){
+        const lead = cars[i-1], foll = cars[i];
+        const dir = new THREE.Vector3().subVectors(lead.position, foll.position);
+        const dist = dir.length();
+        if (dist > SEGMENT_DISTANCE){
+          dir.normalize();
+          foll.position.add(dir.multiplyScalar(Math.min(dist-SEGMENT_DISTANCE, speed*dt*1.5)));
+        }
+        const targetRot = Math.atan2(dir.x, dir.z);
+        foll.rotationY += (targetRot - foll.rotationY) * 0.15;
+      }
+
+      // apply transforms
+      for (let i=0;i<cars.length;i++){
+        const c = cars[i];
+        c.mesh.position.copy(c.position).setY(0.6);
+        c.mesh.rotation.y = c.rotationY;
+      }
+
+      // pickups
+      for (let i=pickups.length-1; i>=0; i--){
+        if (pickups[i].position.distanceTo(player.position) < 3){
+          scene.remove(pickups[i]); pickups.splice(i,1);
+          score++; scoreEl.textContent = score;
+          addFollower(); spawnPickup();
+        }
+      }
+
+      // obstacles
+      for (const o of obstacles){
+        if (o.position.distanceTo(player.position) < 4.5){
+          doGameOver(); break;
+        }
+      }
+
+      // boundary
+      if (player.position.length() > ARENA_RADIUS){
+        doGameOver();
       }
     }
 
-    for(const obs of obstacles){
-      if(obs.position.distanceTo(player.position) < 4.5){
-        alive = false;
-        scoreEl.textContent = `Crashed into obstacle! Final Score: ${score}`;
-        gameOver();
-      }
-    }
-
-    if (player.position.length() > ARENA_RADIUS) {
-      alive = false;
-      scoreEl.textContent = `Hit the wall! Final Score: ${score}`;
-      gameOver();
-    }
-
-    const camOffset = new THREE.Vector3(0, 15, -30).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotationY);
+    // camera
+    const camOffset = new THREE.Vector3(0, 15, -30).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
     camera.position.copy(player.position.clone().add(camOffset));
     camera.lookAt(player.position);
 
     renderer.render(scene, camera);
   }
 
-  window.addEventListener('resize', () => {
-    camera.aspect = innerWidth / innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
+  function doGameOver(){
+    if (!alive) return;
+    alive = false;
+    scoreEl.textContent = score;
+    // submit on death (same behavior you had)
+    if (!leaderboardSubmitted){
+      leaderboardSubmitted = true;
+      submitScore(playerName || 'Player', score);
+    }
+    // show restart overlay with prefilled name
+    document.getElementById('finalScore').textContent = score;
+    restartNameInput.value = playerName || '';
+    restartOverlay.style.display = 'grid';
+  }
+
+  /* =========================
+     Start / Restart UX
+  ========================== */
+  startBtn.addEventListener('click', () => {
+    const nm = (nameInput.value || '').trim().substring(0,20);
+    if (!nm){ nameInput.focus(); return; }
+    playerName = nm; localStorage.setItem('f1snake_name', playerName);
+    score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false; alive = true;
+    chatBox.style.display = 'flex';
+    startOverlay.style.display = 'none';
+    // also focus chat input on start for convenience
+    setTimeout(()=> chatInputEl.blur(), 0);
+  });
+  nameInput.addEventListener('keydown', e=>{ if (e.key==='Enter') startBtn.click(); });
+
+  restartBtn.addEventListener('click', () => {
+    const nm = (restartNameInput.value || '').trim().substring(0,20);
+    playerName = nm || playerName || 'Player';
+    localStorage.setItem('f1snake_name', playerName);
+    // reset game state
+    score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false; alive = true;
+    // reposition player & clear followers (go back to just the head)
+    while (cars.length > 1){
+      const seg = cars.pop(); scene.remove(seg.mesh);
+    }
+    cars[0].position.set(0,0,0); cars[0].rotationY = 0;
+    cars[0].mesh.position.set(0,0,0); cars[0].mesh.rotation.y = 0;
+    // hide overlay
+    restartOverlay.style.display = 'none';
   });
 
+  // Show chat only after name entered; but start listening immediately so messages render once visible
+  startChatListener();
+
+  // start the render loop immediately so overlays have animated background
+  animate();
+
+  // responsive
+  window.addEventListener('resize', ()=>{
+    camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
 })();
 </script>
 </body>
