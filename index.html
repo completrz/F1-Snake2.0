@@ -46,26 +46,13 @@
     padding: 4px 0;
     border-bottom: 1px solid #0ff33aa;
   }
-  #submitNameContainer {
-    margin-top: 10px;
-    text-align: center;
-  }
   #playerNameInput {
-    width: 90%;
+    width: 200px;
     padding: 6px;
     border-radius: 6px;
     border: none;
     font-size: 1rem;
-  }
-  #submitNameBtn {
-    margin-top: 6px;
-    background: #0ff;
-    border: none;
-    color: black;
-    font-weight: bold;
-    padding: 6px 12px;
-    border-radius: 6px;
-    cursor: pointer;
+    margin-bottom: 12px;
   }
 </style>
 
@@ -78,16 +65,14 @@
 <body>
 <div id="ui">
   Score: <span id="score">0</span><br/>
+  Enter Name: <input id="playerNameInput" type="text" placeholder="Your name" maxlength="20" />
+  <br />
   Controls: A/D or ◀️/▶️ or touch left/right half, double tap or two-finger tap to boost
 </div>
 
 <div id="leaderboard">
   <h2>🏆 Leaderboard</h2>
   <ul id="leaderboard-list"></ul>
-  <div id="submitNameContainer">
-    <input id="playerNameInput" type="text" placeholder="Enter your name" maxlength="20" />
-    <button id="submitNameBtn">Submit Score</button>
-  </div>
 </div>
 
 <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
@@ -108,7 +93,10 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
-  async function submitScore(name, score) {
+  let playerName = '';
+
+  async function submitScoreIfHigher(name, score) {
+    if (!name) return;
     try {
       const docRef = db.collection('leaderboard').doc(name);
       const doc = await docRef.get();
@@ -276,9 +264,16 @@
   window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
   window.addEventListener('click', handleTap);
 
-  let score = 0;
   const scoreEl = document.getElementById('score');
+  const playerNameInput = document.getElementById('playerNameInput');
+  const leaderboardList = document.getElementById('leaderboard-list');
+
+  let score = 0;
   let alive = true;
+
+  playerNameInput.addEventListener('change', e => {
+    playerName = e.target.value.trim().substring(0,20);
+  });
 
   function canBoost(car) {
     const now = performance.now();
@@ -298,11 +293,6 @@
     }
   }
 
-  // Leaderboard DOM refs
-  const leaderboardList = document.getElementById('leaderboard-list');
-  const playerNameInput = document.getElementById('playerNameInput');
-  const submitNameBtn = document.getElementById('submitNameBtn');
-
   async function updateLeaderboard() {
     const topScores = await getTopScores();
     leaderboardList.innerHTML = '';
@@ -312,14 +302,6 @@
       leaderboardList.appendChild(li);
     });
   }
-
-  submitNameBtn.onclick = async () => {
-    const name = playerNameInput.value.trim().substring(0, 20) || 'Player';
-    await submitScore(name, score);
-    await updateLeaderboard();
-    playerNameInput.disabled = true;
-    submitNameBtn.disabled = true;
-  };
 
   // Auto update leaderboard every 10 seconds
   setInterval(() => {
@@ -331,12 +313,13 @@
 
   let lastTime = performance.now();
 
-  function gameOver() {
-    alive = false;
-    scoreEl.textContent = `Game Over! Final Score: ${score}`;
+  async function trySubmitScore() {
+    if (playerName && alive) {
+      await submitScoreIfHigher(playerName, score);
+    }
   }
 
-  function animate() {
+  async function animate() {
     requestAnimationFrame(animate);
     const now = performance.now();
     const deltaRaw = (now - lastTime) / 1000;
@@ -392,6 +375,7 @@
         scoreEl.textContent = score;
         addFollower();
         spawnPickup();
+        await trySubmitScore();
       }
     }
 
@@ -410,6 +394,12 @@
     camera.lookAt(player.position);
 
     renderer.render(scene, camera);
+  }
+
+  function gameOver() {
+    alive = false;
+    scoreEl.textContent = `Game Over! Final Score: ${score}`;
+    trySubmitScore();
   }
 
   animate();
