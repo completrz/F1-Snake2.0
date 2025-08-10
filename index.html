@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>F1 Snake — Leaderboard + Chat + Prime Karambit</title>
+<title>F1 Snake — Leaderboard + Chat + Prime Karambit + Ranks</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <style>
   :root{
@@ -21,17 +21,20 @@
   #hud {
     position: absolute; top: 14px; left: 14px; z-index: 30;
     background: var(--glass); padding: 10px 12px; border-radius: 12px;
-    backdrop-filter: blur(6px); width: 260px;
+    backdrop-filter: blur(6px); width: 280px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.35);
   }
-  #scoreRow { font-weight: 700; font-size: 18px; display:flex; justify-content:space-between; }
+  #scoreRow { font-weight: 700; font-size: 18px; display:flex; justify-content:space-between; gap:8px; align-items:center; }
   #timer { font-variant-numeric: tabular-nums; opacity:.95; }
+  #rankNow { font-size:12px; opacity:.9; display:flex; align-items:center; gap:6px; margin-top:6px;}
+  #rankNow img{ width:18px; height:18px; vertical-align:middle; }
+
   #hint   { margin-top: 6px; font-size: 12px; opacity: .85; line-height: 1.35; }
 
   /* Chat (square, under instructions, left) */
   #chat {
     margin-top: 10px;
-    width: 260px; height: 260px;
+    width: 280px; height: 260px;
     background: var(--panel);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 12px;
@@ -56,7 +59,7 @@
   /* Right column (leaderboard) */
   #rightCol{
     position: absolute; top: 14px; right: 14px; z-index: 30;
-    width: 320px; display:flex; flex-direction:column; gap: 12px;
+    width: 340px; display:flex; flex-direction:column; gap: 12px;
   }
   #leaderboard {
     width: 100%; max-height: 420px; overflow-y: auto;
@@ -76,13 +79,15 @@
     padding: 8px 8px; margin: 4px 0;
     background: rgba(255,255,255,0.04);
     border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px; font-size: 14px;
+    border-radius: 10px; font-size: 14px; gap:8px;
   }
+  .lb-left{ display:flex; align-items:center; gap:8px; min-width:0; }
+  .rankIcon{ width:18px; height:18px; flex:0 0 18px; }
   #lbList li .rank{
     width: 22px; height: 22px; border-radius: 6px; display:flex; align-items:center; justify-content:center;
-    background: rgba(255,255,255,0.08); font-size: 12px; margin-right: 8px;
+    background: rgba(255,255,255,0.08); font-size: 12px; margin-right: 4px; flex:0 0 22px;
   }
-  #lbList li .name{ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lbList li .name{ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width:0; }
   #lbList li .score{ font-weight: 700; color: #b7f; }
 
   /* Overlays (start/restart) */
@@ -135,6 +140,7 @@
     <span>Score: <span id="score">0</span></span>
     <span id="timer">00:00</span>
   </div>
+  <div id="rankNow"><img id="rankNowIcon" alt="" /><span id="rankNowText">Rank: —</span></div>
   <div id="hint">Controls: A/D or ◀️/▶️ • Touch left/right • Double-tap/2-finger = Boost • Press <b>F</b> to inspect</div>
 
   <div id="chat">
@@ -148,7 +154,7 @@
 <div id="rightCol">
   <div id="leaderboard">
     <div id="lbHeader"><span class="dot"></span><h3>Top 10 — Global Leaderboard</h3></div>
-    <ul id="lbList"><li><span class="rank">–</span><span class="name">Loading…</span><span class="score">–</span></li></ul>
+    <ul id="lbList"><li><div class="lb-left"><span class="rank">–</span><img class="rankIcon" alt="" /><span class="name">Loading…</span></div><span class="score">–</span></li></ul>
   </div>
 </div>
 
@@ -206,6 +212,8 @@
   const chatMessagesEl = document.getElementById('chatMessages');
   const chatInputEl = document.getElementById('chatInput');
   const lbList = document.getElementById('lbList');
+  const rankNowIcon = document.getElementById('rankNowIcon');
+  const rankNowText = document.getElementById('rankNowText');
 
   /* ========= State ========= */
   let playerName = localStorage.getItem('f1snake_name') || '';
@@ -216,45 +224,184 @@
   let gameStartMs = 0;
   let spawnGraceUntil = 0; // ms timestamp for spawn invulnerability
 
+  /* ========= Ranks ========= */
+  const RANKS = [
+    'Iron 1','Iron 2','Iron 3',
+    'Bronze 1','Bronze 2','Bronze 3',
+    'Silver 1','Silver 2','Silver 3',
+    'Gold 1','Gold 2','Gold 3',
+    'Platinum 1','Platinum 2','Platinum 3',
+    'Diamond 1','Diamond 2','Diamond 3',
+    'Ascendant 1','Ascendant 2','Ascendant 3',
+    'Immortal 1','Immortal 2','Immortal 3',
+    'Radiant'
+  ];
+  const RADIANT_INDEX = RANKS.length - 1;
+  function rankGroup(idx){
+    if (idx === RADIANT_INDEX) return 'Radiant';
+    const groups = ['Iron','Bronze','Silver','Gold','Platinum','Diamond','Ascendant','Immortal'];
+    return groups[Math.floor(idx/3)] || 'Radiant';
+  }
+  function sanitizeId(name){
+    return (name||'player').trim().toLowerCase().replace(/[^a-z0-9_-]/g,'_');
+  }
+  function rankColor(idx){
+    const g = rankGroup(idx);
+    switch(g){
+      case 'Iron': return '#8c8c8c';
+      case 'Bronze': return '#b88650';
+      case 'Silver': return '#b9c3cf';
+      case 'Gold': return '#e7c14c';
+      case 'Platinum': return '#3dd4c6';
+      case 'Diamond': return '#66a5ff';
+      case 'Ascendant': return '#4bd37d';
+      case 'Immortal': return '#c15cff';
+      case 'Radiant': return '#ffe75e';
+      default: return '#999';
+    }
+  }
+  function rankBadgeDataURI(idx){
+    const col = rankColor(idx);
+    const svg =
+`<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${col}"/>
+      <stop offset="1" stop-color="#111"/>
+    </linearGradient>
+    <filter id="s" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="0" stdDeviation="0.8" flood-color="${col}" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+  <polygon points="9,1 16,6 13.8,16 4.2,16 2,6" fill="url(#g)" stroke="${col}" stroke-width="1" filter="url(#s)"/>
+</svg>`;
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  }
+  async function getOrCreatePlayerRank(name){
+    const id = sanitizeId(name);
+    const ref = db.collection('players').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists){
+      const data = { name, rankIndex: 0, rr: 0, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+      await ref.set(data);
+      return data;
+    }
+    return snap.data();
+  }
+  function computeRRDelta(rankIndex, score, elapsedMs){
+    const minutes = elapsedMs / 60000;
+    const perf = score + Math.min(12, minutes * 1.2);
+    const base = (perf - 6) * 9; // centered near 6
+    const tierGroup = Math.min(7, Math.floor(rankIndex/3)); // 0..7
+    const scale = 1 - Math.min(0.72, tierGroup * 0.08);     // gain shrinks with rank
+    let delta = Math.round(base * scale);
+
+    if (score >= 20) delta += 12;
+    if (score >= 35) delta += 16;
+    if (score <= 1 && minutes < 0.4) delta -= 25;
+    if (score === 0 && minutes < 0.25) delta -= 35;
+
+    if (rankIndex <= 5 && delta < 0) delta = Math.max(delta, -18); // protect low ranks
+    delta = Math.max(-45, Math.min(70, delta)); // cap
+    return delta;
+  }
+  function setHudRank(idx){
+    rankNowIcon.src = rankBadgeDataURI(idx);
+    rankNowText.textContent = `Rank: ${RANKS[idx] || 'Unrated'}`;
+  }
+  async function applyMatchResultAndSave(name, scoreVal, elapsedMs){
+    const id = sanitizeId(name);
+    const ref = db.collection('players').doc(id);
+    const data = await getOrCreatePlayerRank(name);
+
+    let idx = data.rankIndex || 0;
+    let rr = data.rr || 0;
+
+    let delta = computeRRDelta(idx, scoreVal, elapsedMs);
+    if (idx === RADIANT_INDEX){
+      delta = Math.max(-25, Math.min(25, Math.round(delta*0.4)));
+    }
+    rr += delta;
+
+    // promotions / demotions with overflow (double rank up possible)
+    while (rr >= 100 && idx < RADIANT_INDEX){ rr -= 100; idx += 1; }
+    while (rr < 0 && idx > 0){ rr += 100; idx -= 1; }
+    if (idx === 0 && rr < 0) rr = 0;
+    if (idx === RADIANT_INDEX && rr > 100) rr = 100;
+
+    const newData = { name, rankIndex: idx, rr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    await ref.set(newData, {merge:true});
+    setHudRank(idx);
+    return newData;
+  }
+  async function submitScoreAndMirrorRank(name, scoreVal, rankData){
+    try{
+      await db.collection('leaderboard').add({
+        name,
+        score: scoreVal,
+        rankIndex: rankData?.rankIndex ?? 0,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }catch(e){ console.error(e); }
+  }
+
   /* ========= Leaderboard ========= */
   function startLeaderboardListener(){
-    db.collection('leaderboard').orderBy('score','desc').limit(10).onSnapshot(snap=>{
+    db.collection('leaderboard').orderBy('score','desc').limit(10).onSnapshot(async snap=>{
       lbList.innerHTML = '';
-      let rank = 1;
+      let rankPos = 1;
+      const items = [];
       snap.forEach(doc=>{
         const d = doc.data();
-        const li = document.createElement('li');
-        li.innerHTML = `<span class="rank">${rank}</span>
-                        <span class="name">${(d.name||'Player')}</span>
-                        <span class="score">${d.score||0}</span>`;
-        lbList.appendChild(li);
-        rank++;
+        items.push({id: doc.id, name: d.name||'Player', score: d.score||0, rankIndex: (typeof d.rankIndex==='number')? d.rankIndex : null});
       });
-      if (rank === 1){
+
+      const fetches = items.map(async it=>{
+        if (it.rankIndex === null){
+          const ps = await db.collection('players').doc(sanitizeId(it.name)).get();
+          it.rankIndex = ps.exists ? (ps.data().rankIndex||0) : 0;
+        }
+        return it;
+      });
+      const resolved = await Promise.all(fetches);
+
+      for (const it of resolved){
         const li = document.createElement('li');
-        li.innerHTML = `<span class="rank">–</span><span class="name">No scores yet</span><span class="score">–</span>`;
+        const left = document.createElement('div');
+        left.className = 'lb-left';
+        const rankSpan = document.createElement('span');
+        rankSpan.className = 'rank';
+        rankSpan.textContent = rankPos;
+        const img = document.createElement('img');
+        img.className = 'rankIcon';
+        img.src = rankBadgeDataURI(it.rankIndex||0);
+        img.alt = '';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'name';
+        nameSpan.textContent = it.name;
+
+        left.appendChild(rankSpan);
+        left.appendChild(img);
+        left.appendChild(nameSpan);
+
+        const scoreSpan = document.createElement('span');
+        scoreSpan.className = 'score';
+        scoreSpan.textContent = it.score;
+
+        li.appendChild(left);
+        li.appendChild(scoreSpan);
+        lbList.appendChild(li);
+        rankPos++;
+      }
+
+      if (rankPos === 1){
+        const li = document.createElement('li');
+        li.innerHTML = `<div class="lb-left"><span class="rank">–</span><img class="rankIcon" alt="" /><span class="name">No scores yet</span></div><span class="score">–</span>`;
         lbList.appendChild(li);
       }
     });
   }
   startLeaderboardListener();
-
-  async function submitScore(name, scoreVal){
-    try{
-      const q = await db.collection('leaderboard').where('name','==',name).limit(1).get();
-      if (!q.empty){
-        const docRef = q.docs[0].ref;
-        const prev = q.docs[0].data().score || 0;
-        if (scoreVal > prev){
-          await docRef.update({score: scoreVal, timestamp: firebase.firestore.FieldValue.serverTimestamp()});
-        }
-      } else {
-        await db.collection('leaderboard').add({
-          name, score: scoreVal, timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      }
-    }catch(e){ console.error(e); }
-  }
 
   /* ========= Chat (last 50) ========= */
   const CHAT_MAX = 50;
@@ -344,7 +491,6 @@
   scene.add(dirLight);
 
   /* ---------- Track / Ground ---------- */
-  // Playable everywhere on the disc; ring visuals only
   const grass = new THREE.Mesh(
     new THREE.CircleGeometry(ARENA_RADIUS, 128),
     new THREE.MeshStandardMaterial({color:0x7bbf5d, roughness:0.95, metalness:0.0})
@@ -605,7 +751,7 @@
     const g = new THREE.Group();
 
     // Curved blade using torus segment + thinner "edge" overlay for bevel look
-    const arc = Math.PI * 1.15; // more than half circle
+    const arc = Math.PI * 1.15;
     const bladeGeo = new THREE.TorusGeometry(0.9, 0.09, 20, 120, arc);
     const blade = new THREE.Mesh(bladeGeo, bladeMaterial());
     blade.rotation.x = Math.PI/2;
@@ -620,7 +766,7 @@
     edge.scale.set(1.02,1.02,1.02);
     g.add(edge);
 
-    // Gold spine accents along blade (thin arcs)
+    // Gold spine accents along blade (thin arc)
     const spineGeo = new THREE.TorusGeometry(0.88, 0.02, 8, 80, arc*0.92);
     const spine = new THREE.Mesh(spineGeo, goldMaterial());
     spine.rotation.copy(blade.rotation);
@@ -695,7 +841,6 @@
 
   function updateKnife(dt){
     if (!knife.group) return;
-
     // idle sway
     const t = performance.now() * 0.001;
     knife.group.position.y = knife.basePos.y + Math.sin(t*2.2)*0.01;
@@ -863,24 +1008,36 @@
     renderer.render(scene, camera);
   }
 
-  function doGameOver(){
+  async function doGameOver(){
     if (!alive) return;
     alive = false;
     scoreEl.textContent = score;
-    if (!leaderboardSubmitted){
-      leaderboardSubmitted = true;
-      submitScore(playerName || 'Player', score);
-    }
+
+    // Rank update & mirror to leaderboard
+    const elapsed = performance.now() - gameStartMs;
+    let rankData = null;
+    try{
+      rankData = await applyMatchResultAndSave(playerName || 'Player', score, elapsed);
+      await submitScoreAndMirrorRank(playerName || 'Player', score, rankData);
+    }catch(e){ console.error('Rank/leaderboard update failed', e); }
+
     document.getElementById('finalScore').textContent = score;
     restartNameInput.value = playerName || '';
     restartOverlay.style.display = 'grid';
   }
 
   /* ========= Start / Restart ========= */
-  startBtn.addEventListener('click', () => {
+  startBtn.addEventListener('click', async () => {
     const nm = (nameInput.value || '').trim().substring(0,20);
     if (!nm){ nameInput.focus(); return; }
     playerName = nm; localStorage.setItem('f1snake_name', playerName);
+
+    // load & show current rank in HUD
+    try{
+      const p = await getOrCreatePlayerRank(playerName);
+      setHudRank(p.rankIndex || 0);
+    }catch(e){ console.error(e); setHudRank(0); }
+
     score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false;
     setStartPosition();
     gameStartMs = performance.now();
@@ -892,10 +1049,17 @@
   });
   nameInput.addEventListener('keydown', e=>{ if (e.key==='Enter') startBtn.click(); });
 
-  restartBtn.addEventListener('click', () => {
+  restartBtn.addEventListener('click', async () => {
     const nm = (restartNameInput.value || '').trim().substring(0,20);
     playerName = nm || playerName || 'Player';
     localStorage.setItem('f1snake_name', playerName);
+
+    // refresh HUD rank
+    try{
+      const p = await getOrCreatePlayerRank(playerName);
+      setHudRank(p.rankIndex || 0);
+    }catch(e){ console.error(e); setHudRank(0); }
+
     score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false;
     setStartPosition();
     gameStartMs = performance.now();
