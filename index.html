@@ -165,7 +165,6 @@
   </div>
   <div id="reelsPanel">
     <h4>Instagram Reels</h4>
-    <!-- Reels render here -->
     <div id="reelsContainer"></div>
   </div>
 </div>
@@ -232,6 +231,7 @@
   let score = 0;
   let leaderboardSubmitted = false;
   let gameStartMs = 0;
+  let spawnGraceUntil = 0; // ms timestamp for spawn invulnerability
 
   /* ========= Leaderboard ========= */
   function startLeaderboardListener(){
@@ -317,6 +317,9 @@
 
   /* ========= THREE / Scene ========= */
   const ARENA_RADIUS = 120;
+  const TRACK_WIDTH = 28;
+  const trackInner = ARENA_RADIUS - TRACK_WIDTH;
+
   const SEGMENT_DISTANCE = 6;
   const BOOST_MULTIPLIER = 2.4;
   const BOOST_DURATION = 2000;
@@ -332,7 +335,7 @@
   renderer.setSize(innerWidth, innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  /* ---------- Sky Dome (gradient) ---------- */
+  /* ---------- Sky Dome ---------- */
   function makeSkyDome(){
     const c = document.createElement('canvas');
     c.width = 2; c.height = 256;
@@ -358,8 +361,6 @@
   scene.add(dirLight);
 
   /* ---------- Track / Ground ---------- */
-  const trackInner = ARENA_RADIUS - 28;
-
   const grass = new THREE.Mesh(
     new THREE.CircleGeometry(ARENA_RADIUS, 128),
     new THREE.MeshStandardMaterial({color:0x7bbf5d, roughness:0.95, metalness:0.0})
@@ -502,7 +503,7 @@
     return group;
   }
   function spawnPickup(){
-    const r = THREE.MathUtils.randFloat(10, ARENA_RADIUS-10);
+    const r = THREE.MathUtils.randFloat(trackInner+2, ARENA_RADIUS-2);
     const a = THREE.MathUtils.randFloat(0, Math.PI*2);
     const x = Math.cos(a)*r, z = Math.sin(a)*r;
     const cell = createFuelCell();
@@ -536,7 +537,7 @@
   }
   function spawnObstacles(){
     for(let i=0;i<OBSTACLE_COUNT;i++){
-      const r = THREE.MathUtils.randFloat(18, ARENA_RADIUS-16);
+      const r = THREE.MathUtils.randFloat(trackInner+3, ARENA_RADIUS-3);
       const a = THREE.MathUtils.randFloat(0, Math.PI*2);
       const x = Math.cos(a)*r, z = Math.sin(a)*r;
       const b = makeBarrier(); b.position.set(x,0,z); scene.add(b);
@@ -594,49 +595,27 @@
     if (car.boost.active && t > car.boost.timer) car.boost.active = false;
   }
 
-  /* ---------- FIRST-PERSON KNIFE (inspired karambit) ---------- */
-  // Note: custom, original geometry inspired by a curved karambit shape (not using any game assets).
+  /* ---------- FIRST-PERSON KNIFE ---------- */
   const knife = { group:null, inspecting:false, t:0, dur:1400 };
   function makeKarambit(){
     const g = new THREE.Group();
-
-    // Curved blade: torus segment scaled + sharpened tip cone
     const bladeMat = new THREE.MeshStandardMaterial({color:0xdedede, metalness:0.9, roughness:0.2});
     const blade = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.08, 16, 64, Math.PI*1.1), bladeMat);
-    blade.rotation.x = Math.PI/2;
-    blade.rotation.z = Math.PI/6;
-    blade.position.set(0.1, -0.05, 0.1);
-    g.add(blade);
-
+    blade.rotation.x = Math.PI/2; blade.rotation.z = Math.PI/6; blade.position.set(0.1, -0.05, 0.1); g.add(blade);
     const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.22, 16), bladeMat);
-    tip.rotation.x = -Math.PI/2;
-    tip.position.set(0.75, 0.02, 0.22);
-    g.add(tip);
-
-    // Handle with ring
+    tip.rotation.x = -Math.PI/2; tip.position.set(0.75, 0.02, 0.22); g.add(tip);
     const hMat = new THREE.MeshStandardMaterial({color:0x111217, metalness:0.6, roughness:0.6});
     const handle = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.55, 8, 16), hMat);
-    handle.rotation.z = Math.PI/6;
-    handle.position.set(-0.35, -0.02, -0.05);
-    g.add(handle);
-
+    handle.rotation.z = Math.PI/6; handle.position.set(-0.35, -0.02, -0.05); g.add(handle);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.045, 14, 24), new THREE.MeshStandardMaterial({color:0xf1c40f, metalness:0.7, roughness:0.35}));
-    ring.rotation.x = Math.PI/2;
-    ring.position.set(-0.58, 0.02, -0.08);
-    g.add(ring);
-
-    // Small accents
+    ring.rotation.x = Math.PI/2; ring.position.set(-0.58, 0.02, -0.08); g.add(ring);
     const inlay = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.02,0.28), new THREE.MeshStandardMaterial({color:0xffdf80, metalness:0.8, roughness:0.4}));
-    inlay.rotation.z = Math.PI/6;
-    inlay.position.set(-0.28, 0.06, -0.05);
-    g.add(inlay);
-
+    inlay.rotation.z = Math.PI/6; inlay.position.set(-0.28, 0.06, -0.05); g.add(inlay);
     return g;
   }
   function addKnifeToCamera(){
     knife.group = makeKarambit();
     camera.add(knife.group);
-    // Position in view (bottom-right)
     knife.group.position.set(0.6, -0.4, -1.0);
     knife.group.rotation.set(-0.2, 0.6, 0.3);
     scene.add(camera);
@@ -646,17 +625,39 @@
     knife.inspecting = true; knife.t = 0;
   }
   window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase()==='f') startInspect(); });
-
   function updateInspect(dt){
     if (!knife.inspecting || !knife.group) return;
     knife.t += dt*1000;
-    const p = Math.min(1, knife.t/knife.dur);              // 0..1
+    const p = Math.min(1, knife.t/knife.dur);
     const easeOut = 1 - Math.pow(1-p, 3);
-    // Animate a flourish spin + bob
     knife.group.rotation.y = 0.6 + Math.sin(easeOut*Math.PI*2)*1.2;
     knife.group.rotation.x = -0.2 + Math.sin(easeOut*Math.PI*2)*0.25;
     knife.group.position.y = -0.4 + Math.sin(easeOut*Math.PI*2)*0.08;
-    if (p >= 1){ knife.inspecting = false; }               // end
+    if (p >= 1){ knife.inspecting = false; }
+  }
+
+  /* ========= Helpers: spawn position & grace ========= */
+  function setStartPosition(){
+    // spawn on the track center line at the "south" point (negative Z)
+    const radius = (trackInner + ARENA_RADIUS) * 0.5; // middle of the ring
+    const angle = Math.PI * 1.5; // 270° => negative Z
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const player = cars[0];
+    player.position.set(x, 0, z);
+    player.rotationY = 0; // facing +Z toward center; movement reduces radius initially
+    player.mesh.position.set(x,0,z);
+    player.mesh.rotation.y = 0;
+
+    // reset followers
+    while (cars.length > 1){ const seg = cars.pop(); scene.remove(seg.mesh); }
+
+    // 1s grace so collisions/bounds can't immediately kill you
+    spawnGraceUntil = performance.now() + 1000;
+  }
+
+  function canDie(){
+    return performance.now() >= spawnGraceUntil;
   }
 
   /* ========= Loop ========= */
@@ -764,15 +765,18 @@
       }
 
       // obstacle collisions
-      for (const o of obstacles){
-        if (o.mesh.position.distanceTo(player.position) < 4.0){
-          doGameOver(); break;
+      if (canDie()){
+        for (const o of obstacles){
+          if (o.mesh.position.distanceTo(player.position) < 4.0){
+            doGameOver(); break;
+          }
         }
-      }
 
-      // boundaries
-      if (player.position.length() > ARENA_RADIUS-1.5 || player.position.length() < trackInner+0.5){
-        doGameOver();
+        // boundaries: outside OR inside the ring
+        const rlen = player.position.length();
+        if (rlen > ARENA_RADIUS-1.5 || rlen < trackInner+0.5){
+          doGameOver();
+        }
       }
     }
 
@@ -804,11 +808,13 @@
     const nm = (nameInput.value || '').trim().substring(0,20);
     if (!nm){ nameInput.focus(); return; }
     playerName = nm; localStorage.setItem('f1snake_name', playerName);
-    score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false; alive = true;
+    score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false;
+    setStartPosition();
     gameStartMs = performance.now();
     timerEl.textContent = '00:00';
     chatBox.style.display = 'flex';
     startOverlay.style.display = 'none';
+    alive = true;
     if (!knife.group) addKnifeToCamera();
   });
   nameInput.addEventListener('keydown', e=>{ if (e.key==='Enter') startBtn.click(); });
@@ -817,14 +823,13 @@
     const nm = (restartNameInput.value || '').trim().substring(0,20);
     playerName = nm || playerName || 'Player';
     localStorage.setItem('f1snake_name', playerName);
-    score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false; alive = true;
+    score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false;
+    setStartPosition();
     gameStartMs = performance.now();
     timerEl.textContent = '00:00';
-    while (cars.length > 1){ const seg = cars.pop(); scene.remove(seg.mesh); }
-    cars[0].position.set(0,0,0); cars[0].rotationY = 0;
-    cars[0].mesh.position.set(0,0,0); cars[0].mesh.rotation.y = 0;
     for (const o of obstacles){ o.mesh.position.copy(o.base); }
     restartOverlay.style.display = 'none';
+    alive = true;
     if (!knife.group) addKnifeToCamera();
   });
 
@@ -838,9 +843,7 @@
   });
 
   /* ========= Instagram Reels (embed under leaderboard) ========= */
-  // Replace with your own reel URLs (public, embedding allowed).
   const reelsUrls = [
-    // Example public reel URLs (replace these)
     "https://www.instagram.com/reel/CwLQb3xv123/",
     "https://www.instagram.com/reel/C1Sample234/",
     "https://www.instagram.com/reel/C9Another567/"
@@ -861,7 +864,6 @@
       window.instgrm.Embeds.process();
     }
   }
-  // process again if the script loads later
   window.addEventListener('load', ()=> renderReels(reelsUrls));
 })();
 </script>
