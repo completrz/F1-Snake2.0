@@ -12,7 +12,7 @@
     --danger: #ff3b30;
   }
   html, body {
-    margin: 0; height: 100%; overflow: hidden; background: #0b0f14;
+    margin: 0; height: 100%; overflow: hidden; background: #070b12;
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     color: #fff;
     touch-action: none;
@@ -57,7 +57,7 @@
   /* Leaderboard (top-right) */
   #leaderboard {
     position: absolute; top: 14px; right: 14px; z-index: 30;
-    width: 280px; max-height: 340px; overflow-y: auto;
+    width: 300px; max-height: 360px; overflow-y: auto;
     background: var(--panel);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 14px; box-shadow: 0 6px 22px rgba(0,0,0,0.45);
@@ -151,7 +151,7 @@
 <div id="startOverlay" class="overlay" style="display:grid;">
   <div class="panel">
     <div class="title">F1 Snake</div>
-    <div class="subtitle">Collect green cones to grow. Dodge red cubes. Boost wisely!</div>
+    <div class="subtitle">Collect fuel cells to grow. Avoid track barrels. Boost wisely!</div>
     <div class="inputRow">
       <input id="nameInput" class="textInput" maxlength="20" placeholder="Player name" />
       <button id="startBtn" class="btn">Start</button>
@@ -300,24 +300,123 @@
   const isMobile = /Mobi|Android/i.test(navigator.userAgent);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x0b0f14, 0.0025);
-  const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.5, 1000);
+  scene.fog = new THREE.FogExp2(0x09121e, 0.003);
+  const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.5, 2000);
   const renderer = new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(innerWidth, innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x1b2230, 1);
+  /* ---------- Lights ---------- */
+  const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x0b1220, 0.7);
   scene.add(hemiLight);
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-  dirLight.position.set(50, 100, 50); scene.add(dirLight);
+  dirLight.position.set(60, 120, 40);
+  scene.add(dirLight);
 
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(ARENA_RADIUS, 64),
-    new THREE.MeshStandardMaterial({color:0x0d3b66})
-  );
-  ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
+  /* ---------- Procedural textures ---------- */
+  function makeAsphaltTexture(){
+    const c = document.createElement('canvas');
+    c.width = c.height = 512;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#2b2e34';
+    ctx.fillRect(0,0,c.width,c.height);
 
-  // ---- Car Models ----
+    // noise speckles
+    for(let i=0;i<16000;i++){
+      const x = Math.random()*512, y=Math.random()*512;
+      const g = 160 + (Math.random()*70|0);
+      ctx.fillStyle = `rgb(${g},${g},${g})`;
+      ctx.globalAlpha = 0.05 + Math.random()*0.08;
+      ctx.fillRect(x,y,1,1);
+    }
+    ctx.globalAlpha = 1;
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(6,6);
+    tex.anisotropy = 8;
+    return tex;
+  }
+
+  function makeStripeBarrelTexture(){
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    const ctx = c.getContext('2d');
+    for(let i=0;i<6;i++){
+      ctx.fillStyle = (i%2===0)?'#d10':'#fff';
+      ctx.fillRect(0, i*(c.height/6), c.width, (c.height/6));
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1,1);
+    return tex;
+  }
+
+  function makeOuterLine(){
+    const geo = new THREE.RingGeometry(ARENA_RADIUS-0.5, ARENA_RADIUS, 128);
+    const mat = new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.DoubleSide});
+    const ring = new THREE.Mesh(geo, mat);
+    ring.rotation.x = -Math.PI/2;
+    ring.position.y = 0.02;
+    return ring;
+  }
+
+  /* ---------- Ground (asphalt + outer line + dashed lanes) ---------- */
+  const groundMat = new THREE.MeshStandardMaterial({
+    map: makeAsphaltTexture(),
+    roughness: 0.95,
+    metalness: 0.0,
+    color: 0xffffff
+  });
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(ARENA_RADIUS, 128), groundMat);
+  ground.rotation.x = -Math.PI/2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  scene.add(makeOuterLine());
+
+  // center start grid (checkered)
+  function makeCheckeredTile(){
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    for(let y=0;y<8;y++){
+      for(let x=0;x<8;x++){
+        ctx.fillStyle = ((x+y)%2===0) ? '#111' : '#eee';
+        ctx.fillRect(x*16,y*16,16,16);
+      }
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1,1);
+    return tex;
+  }
+  const gridMat = new THREE.MeshBasicMaterial({ map: makeCheckeredTile(), transparent:true, opacity:0.6 });
+  const gridMesh = new THREE.Mesh(new THREE.PlaneGeometry(14,8), gridMat);
+  gridMesh.rotation.x = -Math.PI/2;
+  gridMesh.position.set(0,0.03, -5);
+  scene.add(gridMesh);
+
+  /* ---------- Background stars dome ---------- */
+  (function addStars(){
+    const starGeo = new THREE.BufferGeometry();
+    const N = 1500;
+    const positions = new Float32Array(N*3);
+    for(let i=0;i<N;i++){
+      const r = 900 + Math.random()*200;
+      const phi = Math.acos(2*Math.random()-1);
+      const theta = Math.random()*Math.PI*2;
+      positions[i*3+0] = r*Math.sin(phi)*Math.cos(theta);
+      positions[i*3+1] = r*Math.cos(phi);
+      positions[i*3+2] = r*Math.sin(phi)*Math.sin(theta);
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(positions,3));
+    const starMat = new THREE.PointsMaterial({size:1.5, color:0x99ccff, transparent:true, opacity:0.8});
+    const stars = new THREE.Points(starGeo, starMat);
+    scene.add(stars);
+  })();
+
+  /* ---------- Car Models ---------- */
   function makeHeadCar(primary=0xff2d55, accent=0xffffff){
     const g = new THREE.Group();
 
@@ -337,8 +436,7 @@
     body.position.set(0, 0.9, 0); body.castShadow = true; g.add(body);
 
     // Sidepods
-    const podMat = bodyMat;
-    const pod = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,3.6), podMat);
+    const pod = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,3.6), bodyMat);
     const pod2 = pod.clone();
     pod.position.set(-1.4, 0.85, 0); pod2.position.set(1.4, 0.85, 0);
     g.add(pod); g.add(pod2);
@@ -418,44 +516,86 @@
     cars.push(follower);
   }
 
-  // ---- Pickups & obstacles ----
-  const pickups = [];
+  /* ---------- Pickups: glowing green fuel cells (bobbing) ---------- */
+  const pickups = []; // each: {mesh, baseY, phase}
+  function createFuelCell(){
+    const group = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(1.0, 0),
+      new THREE.MeshStandardMaterial({color:0x00ffae, emissive:0x00ffae, emissiveIntensity:0.6, roughness:0.3, metalness:0.2})
+    );
+    core.position.y = 1.2;
+    group.add(core);
+
+    // halo
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.2, 0.06, 12, 40),
+      new THREE.MeshBasicMaterial({color:0x66ffd9, transparent:true, opacity:0.6})
+    );
+    ring.rotation.x = Math.PI/2;
+    ring.position.y = 1.2;
+    group.add(ring);
+    return group;
+  }
+
   function spawnPickup(){
     const r = THREE.MathUtils.randFloat(10, ARENA_RADIUS-10);
     const a = THREE.MathUtils.randFloat(0, Math.PI*2);
     const x = Math.cos(a)*r, z = Math.sin(a)*r;
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.2,2.2,10), new THREE.MeshStandardMaterial({color:0x00ffae}));
-    cone.position.set(x,1.1,z); cone.rotation.x = Math.PI;
-    scene.add(cone); pickups.push(cone);
+    const cell = createFuelCell();
+    cell.position.set(x,0,z);
+    scene.add(cell);
+    pickups.push({mesh:cell, baseY:0, phase: Math.random()*Math.PI*2});
   }
   for(let i=0;i<6;i++) spawnPickup();
 
-  // Moving obstacle data structure
-  const obstacles = []; // each: {mesh, base:Vector3, mode, amp, freq, phase, dir:Vector3}
+  /* ---------- Obstacles: red track barrels (striped) ---------- */
+  const obstacles = []; // { mesh, base, mode, amp, freq, phase, dir }
+  const barrelMat = new THREE.MeshStandardMaterial({
+    map: makeStripeBarrelTexture(),
+    metalness: 0.2, roughness: 0.7
+  });
+  function makeBarrel(){
+    const g = new THREE.Group();
+    const cyl = new THREE.Mesh(new THREE.CylinderGeometry(2,2,4,24,1,true), barrelMat);
+    cyl.position.y = 2; g.add(cyl);
+
+    // top & bottom caps (dark)
+    const capMat = new THREE.MeshStandardMaterial({color:0x2b2e34, metalness:0.2, roughness:0.6});
+    const capTop = new THREE.Mesh(new THREE.CircleGeometry(2,24), capMat);
+    capTop.rotation.x = -Math.PI/2; capTop.position.y = 4; g.add(capTop);
+    const capBottom = new THREE.Mesh(new THREE.CircleGeometry(2,24), capMat);
+    capBottom.rotation.x = Math.PI/2; capBottom.position.y = 0; g.add(capBottom);
+
+    // tiny warning light
+    const light = new THREE.Mesh(new THREE.SphereGeometry(0.25,12,12), new THREE.MeshStandardMaterial({color:0xff4040, emissive:0xff4040, emissiveIntensity:1.2}));
+    light.position.set(0,4.4,0); g.add(light);
+    return g;
+  }
+
   function spawnObstacles(){
     for(let i=0;i<OBSTACLE_COUNT;i++){
-      const r = THREE.MathUtils.randFloat(15, ARENA_RADIUS-15);
+      const r = THREE.MathUtils.randFloat(18, ARENA_RADIUS-16);
       const a = THREE.MathUtils.randFloat(0, Math.PI*2);
       const x = Math.cos(a)*r, z = Math.sin(a)*r;
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(6,6,6), new THREE.MeshStandardMaterial({color:0xaa0000}));
-      mesh.position.set(x,3,z);
-      scene.add(mesh);
+      const b = makeBarrel();
+      b.position.set(x,0,z);
+      scene.add(b);
 
-      // assign a movement pattern
       const mode = (i % 2 === 0) ? 'circle' : 'bounce';
-      const amp = THREE.MathUtils.randFloat(4, 10);
-      const freq = THREE.MathUtils.randFloat(0.2, 0.5);
+      const amp = THREE.MathUtils.randFloat(6, 12);
+      const freq = THREE.MathUtils.randFloat(0.15, 0.45);
       const phase = Math.random() * Math.PI * 2;
       let dir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5);
       if (dir.lengthSq() < 0.01) dir.set(1,0,0);
       dir.normalize();
 
-      obstacles.push({ mesh, base: mesh.position.clone(), mode, amp, freq, phase, dir });
+      obstacles.push({ mesh:b, base: b.position.clone(), mode, amp, freq, phase, dir });
     }
   }
   spawnObstacles();
 
-  // ---- Input ----
+  /* ---------- Input ---------- */
   const keys = {};
   window.addEventListener('keydown', e=> keys[e.key.toLowerCase()] = true);
   window.addEventListener('keyup',   e=> keys[e.key.toLowerCase()] = false);
@@ -512,8 +652,7 @@
     const t = (now - startTime)/1000;
     const player = cars[0];
 
-    // ---- Dynamic speed scaling with score ----
-    // Base speed increases as you gain points; capped for control.
+    // Speed scales with score
     const BASE_MIN   = isMobile ? 7 : 13;
     const BASE_MAX   = isMobile ? 26 : 42;
     const PER_POINT  = isMobile ? 0.35 : 0.6;
@@ -555,17 +694,23 @@
         c.mesh.rotation.y = c.rotationY;
       }
 
-      // pickups
+      // animate pickups (bobbing + spin)
+      for (const p of pickups){
+        const y = p.baseY + Math.sin(t*2 + p.phase)*0.3 + 0.8;
+        p.mesh.position.y = y;
+        p.mesh.rotation.y += 0.02;
+      }
+
+      // pickups collection
       for (let i=pickups.length-1; i>=0; i--){
-        if (pickups[i].position.distanceTo(player.position) < 3){
-          scene.remove(pickups[i]); pickups.splice(i,1);
+        if (pickups[i].mesh.position.distanceTo(player.position) < 3){
+          scene.remove(pickups[i].mesh); pickups.splice(i,1);
           score++; scoreEl.textContent = score;
           addFollower(); spawnPickup();
         }
       }
 
-      // ---- Moving obstacles after some score ----
-      // Start moving them gradually after score >= 8; full motion by score 20.
+      // moving barrels start after score >= 8
       const moveFactor = Math.min(1, Math.max(0, (score - 8) / 12)); // 0..1
       if (moveFactor > 0){
         for (const o of obstacles){
@@ -574,28 +719,25 @@
           if (o.mode === 'circle'){
             o.mesh.position.x = o.base.x + Math.cos(w*t + o.phase) * amp;
             o.mesh.position.z = o.base.z + Math.sin(w*t + o.phase) * amp;
-          } else { // bounce along a direction
+          } else {
             const s = Math.sin(w*t + o.phase) * amp;
             o.mesh.position.copy(o.base.clone().add(o.dir.clone().multiplyScalar(s)));
           }
-          o.mesh.rotation.y += 0.4 * dt * moveFactor; // subtle spin
+          o.mesh.rotation.y += 0.4 * dt * moveFactor;
         }
       } else {
-        // keep them at base if not moving yet
-        for (const o of obstacles){
-          o.mesh.position.copy(o.base);
-        }
+        for (const o of obstacles){ o.mesh.position.copy(o.base); }
       }
 
-      // obstacles collision
+      // obstacle collisions
       for (const o of obstacles){
-        if (o.mesh.position.distanceTo(player.position) < 4.5){
+        if (o.mesh.position.distanceTo(player.position) < 4.0){
           doGameOver(); break;
         }
       }
 
       // boundary
-      if (player.position.length() > ARENA_RADIUS){
+      if (player.position.length() > ARENA_RADIUS-2){
         doGameOver();
       }
     }
@@ -642,7 +784,7 @@
     while (cars.length > 1){ const seg = cars.pop(); scene.remove(seg.mesh); }
     cars[0].position.set(0,0,0); cars[0].rotationY = 0;
     cars[0].mesh.position.set(0,0,0); cars[0].mesh.rotation.y = 0;
-    // reset obstacles to base positions so pattern restarts cleanly
+    // reset obstacles to base
     for (const o of obstacles){ o.mesh.position.copy(o.base); }
     restartOverlay.style.display = 'none';
   });
