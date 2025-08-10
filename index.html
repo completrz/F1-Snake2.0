@@ -2,13 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>F1 Snake — Leaderboard + Chat + Prime Karambit + Ranks</title>
+<title>F1 Snake — Leaderboard + Chat + Prime Karambit + Ranks + RR</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 <style>
   :root{
     --glass: rgba(0,0,0,0.35);
     --panel: rgba(0,0,0,0.75);
     --accent: #00e5ff;
+    --good: #3ae374;
+    --bad: #ff4d6d;
   }
   html, body {
     margin: 0; height: 100%; overflow: hidden; background: #87b6ff;
@@ -21,20 +23,22 @@
   #hud {
     position: absolute; top: 14px; left: 14px; z-index: 30;
     background: var(--glass); padding: 10px 12px; border-radius: 12px;
-    backdrop-filter: blur(6px); width: 280px;
+    backdrop-filter: blur(6px); width: 300px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.35);
   }
   #scoreRow { font-weight: 700; font-size: 18px; display:flex; justify-content:space-between; gap:8px; align-items:center; }
   #timer { font-variant-numeric: tabular-nums; opacity:.95; }
-  #rankNow { font-size:12px; opacity:.9; display:flex; align-items:center; gap:6px; margin-top:6px;}
+  #rankNow { font-size:12px; opacity:.95; display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;}
   #rankNow img{ width:18px; height:18px; vertical-align:middle; }
+  #rankText { font-weight:700; }
+  #rrText { padding:2px 6px; border-radius:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); font-variant-numeric:tabular-nums; }
 
   #hint   { margin-top: 6px; font-size: 12px; opacity: .85; line-height: 1.35; }
 
   /* Chat (square, under instructions, left) */
   #chat {
     margin-top: 10px;
-    width: 280px; height: 260px;
+    width: 300px; height: 260px;
     background: var(--panel);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 12px;
@@ -126,6 +130,35 @@
     background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
     margin-bottom: 8px; font-weight:700;
   }
+  /* RR summary on restart */
+  #rrSummary { margin-top: 10px; font-size: 14px; }
+  #rrDelta { font-weight:800; }
+  #rrDelta.good{ color: var(--good); }
+  #rrDelta.bad{ color: var(--bad); }
+
+  /* Rank-up animation */
+  #rankUpOverlay{
+    position:fixed; inset:0; display:none; place-items:center; z-index:60;
+    background: radial-gradient(40% 40% at 50% 50%, rgba(255,255,255,0.06), rgba(0,0,0,0.8));
+  }
+  #rankUpCard{
+    display:flex; flex-direction:column; align-items:center; gap:12px;
+    background: rgba(12,18,28,0.85);
+    border: 1px solid rgba(255,255,255,0.14);
+    padding: 22px 26px; border-radius: 16px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+    animation: pup .6s ease-out both;
+  }
+  @keyframes pup{ from{ transform: scale(.6); opacity:0 } to{ transform: scale(1); opacity:1 } }
+  #rankUpBadge{ width:100px; height:100px; filter: drop-shadow(0 0 18px rgba(255,255,255,0.4)); }
+  #rankUpText{ font-weight:900; letter-spacing:.4px; }
+  .burst{
+    position:absolute; width:6px; height:6px; border-radius:50%;
+    background:#fff; opacity:.9; pointer-events:none; animation: fly 800ms ease-out forwards;
+  }
+  @keyframes fly{
+    to{ transform: translate(var(--dx), var(--dy)) scale(0.2); opacity:0; }
+  }
 </style>
 
 <!-- Firebase -->
@@ -140,7 +173,11 @@
     <span>Score: <span id="score">0</span></span>
     <span id="timer">00:00</span>
   </div>
-  <div id="rankNow"><img id="rankNowIcon" alt="" /><span id="rankNowText">Rank: —</span></div>
+  <div id="rankNow">
+    <img id="rankNowIcon" alt="" />
+    <span id="rankText">Rank: —</span>
+    <span id="rrText">RR: —</span>
+  </div>
   <div id="hint">Controls: A/D or ◀️/▶️ • Touch left/right • Double-tap/2-finger = Boost • Press <b>F</b> to inspect</div>
 
   <div id="chat">
@@ -176,11 +213,26 @@
   <div class="panel">
     <div class="title">Game Over</div>
     <div class="scoreBadge">Final Score: <span id="finalScore">0</span></div>
-    <div class="inputRow">
+
+    <div id="rrSummary">
+      <div id="rrLine1">Previous: <span id="prevRank">—</span> • <span id="prevRR">RR —</span></div>
+      <div id="rrLine2">Now: <span id="nowRank">—</span> • <span id="nowRR">RR —</span> • <span id="rrDelta" class="">(+0 RR)</span></div>
+      <div id="promoNote" style="margin-top:6px; font-weight:700;"></div>
+    </div>
+
+    <div class="inputRow" style="margin-top:12px;">
       <input id="restartNameInput" class="textInput" maxlength="20" placeholder="Player name" />
       <button id="restartBtn" class="btn">Restart</button>
     </div>
     <div class="small">Change your name or keep it the same.</div>
+  </div>
+</div>
+
+<!-- Rank-up animation overlay -->
+<div id="rankUpOverlay">
+  <div id="rankUpCard">
+    <img id="rankUpBadge" alt="">
+    <div id="rankUpText">RANK UP!</div>
   </div>
 </div>
 
@@ -212,17 +264,33 @@
   const chatMessagesEl = document.getElementById('chatMessages');
   const chatInputEl = document.getElementById('chatInput');
   const lbList = document.getElementById('lbList');
+
   const rankNowIcon = document.getElementById('rankNowIcon');
-  const rankNowText = document.getElementById('rankNowText');
+  const rankText = document.getElementById('rankText');
+  const rrText = document.getElementById('rrText');
+
+  const prevRankEl = document.getElementById('prevRank');
+  const prevRREl = document.getElementById('prevRR');
+  const nowRankEl = document.getElementById('nowRank');
+  const nowRREl = document.getElementById('nowRR');
+  const rrDeltaEl = document.getElementById('rrDelta');
+  const promoNoteEl = document.getElementById('promoNote');
+
+  const rankUpOverlay = document.getElementById('rankUpOverlay');
+  const rankUpBadge = document.getElementById('rankUpBadge');
+  const rankUpText = document.getElementById('rankUpText');
 
   /* ========= State ========= */
   let playerName = localStorage.getItem('f1snake_name') || '';
   if (playerName) { nameInput.value = playerName; }
   let alive = false;
   let score = 0;
-  let leaderboardSubmitted = false;
   let gameStartMs = 0;
-  let spawnGraceUntil = 0; // ms timestamp for spawn invulnerability
+  let spawnGraceUntil = 0;
+
+  // Rank snapshot for RR delta calculation
+  let prevRankIndex = 0;
+  let prevRR = 0;
 
   /* ========= Ranks ========= */
   const RANKS = [
@@ -263,7 +331,7 @@
   function rankBadgeDataURI(idx){
     const col = rankColor(idx);
     const svg =
-`<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 18 18">
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="${col}"/>
@@ -291,9 +359,9 @@
   function computeRRDelta(rankIndex, score, elapsedMs){
     const minutes = elapsedMs / 60000;
     const perf = score + Math.min(12, minutes * 1.2);
-    const base = (perf - 6) * 9; // centered near 6
-    const tierGroup = Math.min(7, Math.floor(rankIndex/3)); // 0..7
-    const scale = 1 - Math.min(0.72, tierGroup * 0.08);     // gain shrinks with rank
+    const base = (perf - 6) * 9;
+    const tierGroup = Math.min(7, Math.floor(rankIndex/3));
+    const scale = 1 - Math.min(0.72, tierGroup * 0.08);
     let delta = Math.round(base * scale);
 
     if (score >= 20) delta += 12;
@@ -301,14 +369,16 @@
     if (score <= 1 && minutes < 0.4) delta -= 25;
     if (score === 0 && minutes < 0.25) delta -= 35;
 
-    if (rankIndex <= 5 && delta < 0) delta = Math.max(delta, -18); // protect low ranks
-    delta = Math.max(-45, Math.min(70, delta)); // cap
+    if (rankIndex <= 5 && delta < 0) delta = Math.max(delta, -18);
+    delta = Math.max(-45, Math.min(70, delta));
     return delta;
   }
-  function setHudRank(idx){
+  function setHudRank(idx, rrVal){
     rankNowIcon.src = rankBadgeDataURI(idx);
-    rankNowText.textContent = `Rank: ${RANKS[idx] || 'Unrated'}`;
+    rankText.textContent = `Rank: ${RANKS[idx] || 'Unrated'}`;
+    rrText.textContent = `RR: ${Math.max(0, Math.min(100, Math.round(rrVal ?? 0)))}`;
   }
+
   async function applyMatchResultAndSave(name, scoreVal, elapsedMs){
     const id = sanitizeId(name);
     const ref = db.collection('players').doc(id);
@@ -324,16 +394,17 @@
     rr += delta;
 
     // promotions / demotions with overflow (double rank up possible)
-    while (rr >= 100 && idx < RADIANT_INDEX){ rr -= 100; idx += 1; }
-    while (rr < 0 && idx > 0){ rr += 100; idx -= 1; }
+    let promos = 0, deranks = 0;
+    while (rr >= 100 && idx < RADIANT_INDEX){ rr -= 100; idx += 1; promos++; }
+    while (rr < 0 && idx > 0){ rr += 100; idx -= 1; deranks++; }
     if (idx === 0 && rr < 0) rr = 0;
     if (idx === RADIANT_INDEX && rr > 100) rr = 100;
 
     const newData = { name, rankIndex: idx, rr, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
     await ref.set(newData, {merge:true});
-    setHudRank(idx);
-    return newData;
+    return { ...newData, delta, promos, deranks };
   }
+
   async function submitScoreAndMirrorRank(name, scoreVal, rankData){
     try{
       await db.collection('leaderboard').add({
@@ -437,13 +508,8 @@
       await batch.commit();
     }
   }
-  chatInputEl.addEventListener('keydown', e=>{
-    if (e.key === 'Enter'){
-      e.preventDefault();
-      sendMessage(chatInputEl.value);
-      chatInputEl.value='';
-    }
-  });
+  const chatInput = (e)=>{ if (e.key === 'Enter'){ e.preventDefault(); sendMessage(chatInputEl.value); chatInputEl.value=''; } };
+  chatInputEl.addEventListener('keydown', chatInput);
 
   /* ========= THREE / Scene ========= */
   const ARENA_RADIUS = 120;
@@ -616,7 +682,7 @@
     cars.push(follower);
   }
 
-  /* ---------- Pickups (spawn across entire arena) ---------- */
+  /* ---------- Pickups ---------- */
   const pickups = [];
   function createFuelCell(){
     const group = new THREE.Group();
@@ -648,7 +714,7 @@
   }
   for(let i=0;i<10;i++) spawnPickup();
 
-  /* ---------- Obstacles: scatter through arena ---------- */
+  /* ---------- Obstacles ---------- */
   const obstacles = [];
   const barrelMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
@@ -728,99 +794,45 @@
     if (car.boost.active && t > car.boost.timer) car.boost.active = false;
   }
 
-  /* ---------- FIRST-PERSON KNIFE: Prime Karambit look-alike ---------- */
+  /* ---------- FIRST-PERSON KNIFE ---------- */
   const knife = {
     group:null, basePos:new THREE.Vector3(0.7,-0.55,-1.1), baseRot:new THREE.Euler(-0.15, 0.55, 0.25),
     spin:false, spinStart:0, spinDur:1200
   };
-
-  function goldMaterial(){
-    return new THREE.MeshStandardMaterial({color:0xffd76b, metalness:1.0, roughness:0.25, emissive:0x2a2205, emissiveIntensity:0.05});
-  }
-  function purpleMaterial(){
-    return new THREE.MeshStandardMaterial({color:0x6b4bff, metalness:0.6, roughness:0.35, emissive:0x120a3a, emissiveIntensity:0.08});
-  }
-  function bladeMaterial(){
-    return new THREE.MeshStandardMaterial({color:0xe8e8f0, metalness:1.0, roughness:0.16});
-  }
-  function edgeMaterial(){
-    return new THREE.MeshStandardMaterial({color:0xffffff, metalness:1.0, roughness:0.08});
-  }
+  function goldMaterial(){ return new THREE.MeshStandardMaterial({color:0xffd76b, metalness:1.0, roughness:0.25, emissive:0x2a2205, emissiveIntensity:0.05}); }
+  function purpleMaterial(){ return new THREE.MeshStandardMaterial({color:0x6b4bff, metalness:0.6, roughness:0.35, emissive:0x120a3a, emissiveIntensity:0.08}); }
+  function bladeMaterial(){ return new THREE.MeshStandardMaterial({color:0xe8e8f0, metalness:1.0, roughness:0.16}); }
+  function edgeMaterial(){ return new THREE.MeshStandardMaterial({color:0xffffff, metalness:1.0, roughness:0.08}); }
 
   function makePrimeKarambit(){
     const g = new THREE.Group();
-
-    // Curved blade using torus segment + thinner "edge" overlay for bevel look
     const arc = Math.PI * 1.15;
     const bladeGeo = new THREE.TorusGeometry(0.9, 0.09, 20, 120, arc);
     const blade = new THREE.Mesh(bladeGeo, bladeMaterial());
-    blade.rotation.x = Math.PI/2;
-    blade.rotation.z = Math.PI/2.9;
-    blade.position.set(0.18, 0.0, 0.06);
-    g.add(blade);
-
+    blade.rotation.x = Math.PI/2; blade.rotation.z = Math.PI/2.9; blade.position.set(0.18, 0.0, 0.06); g.add(blade);
     const edgeGeo = new THREE.TorusGeometry(0.9, 0.05, 12, 120, arc);
     const edge = new THREE.Mesh(edgeGeo, edgeMaterial());
-    edge.rotation.copy(blade.rotation);
-    edge.position.copy(blade.position);
-    edge.scale.set(1.02,1.02,1.02);
-    g.add(edge);
-
-    // Gold spine accents along blade (thin arc)
+    edge.rotation.copy(blade.rotation); edge.position.copy(blade.position); edge.scale.set(1.02,1.02,1.02); g.add(edge);
     const spineGeo = new THREE.TorusGeometry(0.88, 0.02, 8, 80, arc*0.92);
     const spine = new THREE.Mesh(spineGeo, goldMaterial());
-    spine.rotation.copy(blade.rotation);
-    spine.position.copy(blade.position);
-    spine.rotation.z += 0.06;
-    g.add(spine);
-
-    // Handle grip
+    spine.rotation.copy(blade.rotation); spine.position.copy(blade.position); spine.rotation.z += 0.06; g.add(spine);
     const grip = new THREE.Mesh(new THREE.CapsuleGeometry(0.10, 0.6, 8, 16), purpleMaterial());
-    grip.rotation.z = Math.PI/6;
-    grip.position.set(-0.42, -0.02, -0.06);
-    g.add(grip);
-
-    // Finger ring (gold outer, purple inner)
+    grip.rotation.z = Math.PI/6; grip.position.set(-0.42, -0.02, -0.06); g.add(grip);
     const ringOuter = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.055, 16, 24), goldMaterial());
-    ringOuter.rotation.x = Math.PI/2;
-    ringOuter.position.set(-0.68, 0.02, -0.10);
-    g.add(ringOuter);
-
+    ringOuter.rotation.x = Math.PI/2; ringOuter.position.set(-0.68, 0.02, -0.10); g.add(ringOuter);
     const ringInner = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.025, 12, 20), purpleMaterial());
-    ringInner.rotation.x = Math.PI/2;
-    ringInner.position.copy(ringOuter.position);
-    g.add(ringInner);
-
-    // Guard + emblem plate
+    ringInner.rotation.x = Math.PI/2; ringInner.position.copy(ringOuter.position); g.add(ringInner);
     const guard = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.32), goldMaterial());
-    guard.rotation.z = Math.PI/6;
-    guard.position.set(-0.24, -0.03, -0.05);
-    g.add(guard);
-
+    guard.rotation.z = Math.PI/6; guard.position.set(-0.24, -0.03, -0.05); g.add(guard);
     const emblem = new THREE.Mesh(new THREE.CircleGeometry(0.08, 20), goldMaterial());
-    emblem.rotation.y = Math.PI/2;
-    emblem.position.set(-0.12, 0.02, -0.06);
-    g.add(emblem);
-
-    // Tiny screws on the grip
+    emblem.rotation.y = Math.PI/2; emblem.position.set(-0.12, 0.02, -0.06); g.add(emblem);
     const screwMat = new THREE.MeshStandardMaterial({color:0xcfd2d7, metalness:0.9, roughness:0.2});
-    for (let i=0;i<2;i++){
-      const s = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,0.06,12), screwMat);
-      s.rotation.x = Math.PI/2;
-      s.position.set(-0.30 + 0.16*i, 0.05, -0.06);
-      g.add(s);
-    }
-
-    // Slight emissive glow strip (Prime vibe)
+    for (let i=0;i<2;i++){ const s = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,0.06,12), screwMat); s.rotation.x = Math.PI/2; s.position.set(-0.30 + 0.16*i, 0.05, -0.06); g.add(s); }
     const glow = new THREE.Mesh(new THREE.BoxGeometry(0.06,0.02,0.36),
       new THREE.MeshStandardMaterial({color:0xbdd4ff, emissive:0x7bb1ff, emissiveIntensity:0.7, metalness:0.3, roughness:0.6}));
-    glow.rotation.z = Math.PI/6;
-    glow.position.set(-0.38, 0.07, -0.05);
-    g.add(glow);
-
+    glow.rotation.z = Math.PI/6; glow.position.set(-0.38, 0.07, -0.05); g.add(glow);
     return g;
   }
-
   function addKnifeToCamera(){
     knife.group = makePrimeKarambit();
     camera.add(knife.group);
@@ -828,35 +840,20 @@
     knife.group.rotation.copy(knife.baseRot);
     scene.add(camera);
   }
-
-  function startSpin(){
-    if (!knife.group || knife.spin) return;
-    knife.spin = true;
-    knife.spinStart = performance.now();
-  }
-
-  window.addEventListener('keydown', (e)=>{
-    if (e.key.toLowerCase() === 'f') startSpin();
-  });
-
-  function updateKnife(dt){
+  function startSpin(){ if (!knife.group || knife.spin) return; knife.spin = true; knife.spinStart = performance.now(); }
+  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase() === 'f') startSpin(); });
+  function updateKnife(){
     if (!knife.group) return;
-    // idle sway
     const t = performance.now() * 0.001;
     knife.group.position.y = knife.basePos.y + Math.sin(t*2.2)*0.01;
     knife.group.rotation.x = knife.baseRot.x + Math.sin(t*1.6)*0.01;
-
     if (knife.spin){
       const now = performance.now();
       const p = Math.min(1, (now - knife.spinStart) / knife.spinDur);
-      const ease = p<0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2; // easeInOutQuad
-      // 360° spin around Y + slight flourish on Z
+      const ease = p<0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
       knife.group.rotation.y = knife.baseRot.y + ease * Math.PI * 2;
       knife.group.rotation.z = knife.baseRot.z + Math.sin(ease*Math.PI)*0.25;
-      if (p >= 1){
-        knife.spin = false;
-        knife.group.rotation.copy(knife.baseRot);
-      }
+      if (p >= 1){ knife.spin = false; knife.group.rotation.copy(knife.baseRot); }
     }
   }
 
@@ -868,14 +865,10 @@
     const z = Math.sin(theta) * radius;
     const player = cars[0];
     player.position.set(x, 0, z);
-    player.rotationY = -theta;   // tangential direction
+    player.rotationY = -theta;
     player.mesh.position.set(x,0,z);
     player.mesh.rotation.y = player.rotationY;
-
-    // reset followers
     while (cars.length > 1){ const seg = cars.pop(); scene.remove(seg.mesh); }
-
-    // 2.5s grace
     spawnGraceUntil = performance.now() + 2500;
   }
   function canDie(){ return performance.now() >= spawnGraceUntil; }
@@ -899,15 +892,11 @@
     const dt = Math.min(dtRaw, 0.05);
     lastTime = now;
 
-    if (alive){
-      const elapsed = now - gameStartMs;
-      timerEl.textContent = fmtTime(elapsed);
-    }
+    if (alive){ const elapsed = now - gameStartMs; timerEl.textContent = fmtTime(elapsed); }
 
     const t = (now - sessionStart)/1000;
     const player = cars[0];
 
-    // Speed scales with score
     const BASE_MIN   = isMobile ? 7 : 13;
     const BASE_MAX   = isMobile ? 26 : 42;
     const PER_POINT  = isMobile ? 0.35 : 0.6;
@@ -929,7 +918,6 @@
       const fwd = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
       player.position.add(fwd.multiplyScalar(speed * dt));
 
-      // followers
       for (let i=1;i<cars.length;i++){
         const lead = cars[i-1], foll = cars[i];
         const dir = new THREE.Vector3().subVectors(lead.position, foll.position);
@@ -942,21 +930,18 @@
         foll.rotationY += (targetRot - foll.rotationY) * 0.15;
       }
 
-      // apply transforms
       for (let i=0;i<cars.length;i++){
         const c = cars[i];
         c.mesh.position.copy(c.position).setY(0);
         c.mesh.rotation.y = c.rotationY;
       }
 
-      // animate pickups (bobbing + spin)
       for (const p of pickups){
         const y = p.baseY + Math.sin(t*2 + p.phase)*0.3 + 0.8;
         p.mesh.position.y = y;
         p.mesh.rotation.y += 0.02;
       }
 
-      // pickups collection
       for (let i=pickups.length-1; i>=0; i--){
         if (pickups[i].mesh.position.distanceTo(player.position) < 3){
           scene.remove(pickups[i].mesh); pickups.splice(i,1);
@@ -965,7 +950,6 @@
         }
       }
 
-      // moving barriers start after score >= 8
       const moveFactor = Math.min(1, Math.max(0, (score - 8) / 12));
       if (moveFactor > 0){
         for (const o of obstacles){
@@ -984,23 +968,16 @@
         for (const o of obstacles){ o.mesh.position.copy(o.base); }
       }
 
-      // collisions & outer boundary (after grace)
       if (canDie()){
         for (const o of obstacles){
-          if (o.mesh.position.distanceTo(player.position) < 4.0){
-            doGameOver(); break;
-          }
+          if (o.mesh.position.distanceTo(player.position) < 4.0){ doGameOver(); break; }
         }
-        if (player.position.length() > ARENA_RADIUS-1.5){
-          doGameOver();
-        }
+        if (player.position.length() > ARENA_RADIUS-1.5){ doGameOver(); }
       }
     }
 
-    // viewmodel updates
-    updateKnife(dt);
+    updateKnife();
 
-    // camera follow
     const camOffset = new THREE.Vector3(0, 15, -30).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
     camera.position.copy(player.position.clone().add(camOffset));
     camera.lookAt(player.position);
@@ -1008,18 +985,76 @@
     renderer.render(scene, camera);
   }
 
+  function totalRR(idx, rr){ return idx*100 + rr; }
+
+  function spawnBursts(centerX, centerY, count=30){
+    for(let i=0;i<count;i++){
+      const b = document.createElement('div');
+      b.className = 'burst';
+      const angle = Math.random()*Math.PI*2;
+      const dist = 120 + Math.random()*120;
+      const dx = Math.cos(angle)*dist, dy = Math.sin(angle)*dist;
+      b.style.left = `${centerX}px`; b.style.top = `${centerY}px`;
+      b.style.setProperty('--dx', dx+'px');
+      b.style.setProperty('--dy', dy+'px');
+      b.style.background = `hsl(${Math.floor(Math.random()*360)}, 85%, 65%)`;
+      document.body.appendChild(b);
+      setTimeout(()=>b.remove(), 900);
+    }
+  }
+
+  function showRankUpAnimation(newIdx, promos){
+    const rect = rankNowIcon.getBoundingClientRect();
+    spawnBursts(rect.left + rect.width/2, rect.top + rect.height/2, 36 + promos*12);
+    rankUpBadge.src = rankBadgeDataURI(newIdx);
+    rankUpText.textContent = promos >= 2 ? 'DOUBLE PROMOTION!' : 'RANK UP!';
+    rankUpOverlay.style.display = 'grid';
+    setTimeout(()=>{ rankUpOverlay.style.display='none'; }, 1400);
+  }
+
   async function doGameOver(){
     if (!alive) return;
     alive = false;
     scoreEl.textContent = score;
 
-    // Rank update & mirror to leaderboard
     const elapsed = performance.now() - gameStartMs;
-    let rankData = null;
+
+    // Previous snapshot (from start of match)
+    const prevIdx = prevRankIndex;
+    const prevRRLocal = prevRR;
+
+    // Apply and save
+    let result = null;
     try{
-      rankData = await applyMatchResultAndSave(playerName || 'Player', score, elapsed);
-      await submitScoreAndMirrorRank(playerName || 'Player', score, rankData);
+      result = await applyMatchResultAndSave(playerName || 'Player', score, elapsed);
+      await submitScoreAndMirrorRank(playerName || 'Player', score, result);
     }catch(e){ console.error('Rank/leaderboard update failed', e); }
+
+    // Update HUD immediately to new values
+    const newIdx = result ? result.rankIndex : prevIdx;
+    const newRR = result ? result.rr : prevRRLocal;
+    setHudRank(newIdx, newRR);
+
+    // RR delta across tiers
+    const deltaTotal = totalRR(newIdx, newRR) - totalRR(prevIdx, prevRRLocal);
+    const sign = deltaTotal >= 0 ? '+' : '';
+    rrDeltaEl.textContent = `(${sign}${deltaTotal} RR)`;
+    rrDeltaEl.className = '';
+    rrDeltaEl.classList.add(deltaTotal >= 0 ? 'good' : 'bad');
+
+    prevRankEl.textContent = RANKS[prevIdx] || 'Unrated';
+    prevRREl.textContent = `RR ${prevRRLocal}`;
+    nowRankEl.textContent = RANKS[newIdx] || 'Unrated';
+    nowRREl.textContent = `RR ${newRR}`;
+    promoNoteEl.textContent = '';
+    if (result){
+      if (result.promos > 0){
+        promoNoteEl.textContent = result.promos >= 2 ? '🔥 Double promotion!' : '⭐ Promotion!';
+        showRankUpAnimation(newIdx, result.promos);
+      } else if (result.deranks > 0){
+        promoNoteEl.textContent = '⬇ Downranked.';
+      }
+    }
 
     document.getElementById('finalScore').textContent = score;
     restartNameInput.value = playerName || '';
@@ -1027,25 +1062,34 @@
   }
 
   /* ========= Start / Restart ========= */
+  async function primeRankSnapshotAndHUD(){
+    try{
+      const p = await getOrCreatePlayerRank(playerName);
+      prevRankIndex = p.rankIndex || 0;
+      prevRR = p.rr || 0;
+      setHudRank(prevRankIndex, prevRR);
+    }catch(e){
+      console.error(e);
+      prevRankIndex = 0; prevRR = 0;
+      setHudRank(0,0);
+    }
+  }
+
   startBtn.addEventListener('click', async () => {
     const nm = (nameInput.value || '').trim().substring(0,20);
     if (!nm){ nameInput.focus(); return; }
     playerName = nm; localStorage.setItem('f1snake_name', playerName);
 
-    // load & show current rank in HUD
-    try{
-      const p = await getOrCreatePlayerRank(playerName);
-      setHudRank(p.rankIndex || 0);
-    }catch(e){ console.error(e); setHudRank(0); }
+    await primeRankSnapshotAndHUD();
 
-    score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false;
+    score = 0; scoreEl.textContent = '0';
     setStartPosition();
     gameStartMs = performance.now();
     timerEl.textContent = '00:00';
     chatBox.style.display = 'flex';
     startOverlay.style.display = 'none';
     alive = true;
-    if (!knife.group) addKnifeToCamera(); // always visible once game starts
+    if (!knife.group) addKnifeToCamera();
   });
   nameInput.addEventListener('keydown', e=>{ if (e.key==='Enter') startBtn.click(); });
 
@@ -1054,13 +1098,9 @@
     playerName = nm || playerName || 'Player';
     localStorage.setItem('f1snake_name', playerName);
 
-    // refresh HUD rank
-    try{
-      const p = await getOrCreatePlayerRank(playerName);
-      setHudRank(p.rankIndex || 0);
-    }catch(e){ console.error(e); setHudRank(0); }
+    await primeRankSnapshotAndHUD();
 
-    score = 0; scoreEl.textContent = '0'; leaderboardSubmitted = false;
+    score = 0; scoreEl.textContent = '0';
     setStartPosition();
     gameStartMs = performance.now();
     timerEl.textContent = '00:00';
