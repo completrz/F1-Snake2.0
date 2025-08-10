@@ -49,7 +49,7 @@
     background: var(--panel);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 12px;
-    display: none;            /* shown after name entered */
+    display: none;
     flex-direction: column;
     overflow: hidden;
   }
@@ -212,7 +212,7 @@
     <div class="subtitle">Collect fuel cells anywhere in the arena. Avoid barriers. Boost wisely!</div>
     <div class="inputRow">
       <input id="nameInput" class="textInput" maxlength="20" placeholder="Player name" />
-      <button id="startBtn" class="btn">Start</button>
+      <button id="startBtn" class="btn" type="button">Start</button>
     </div>
     <div class="small">Your last name is remembered on this device.</div>
   </div>
@@ -232,7 +232,7 @@
 
     <div class="inputRow" style="margin-top:12px;">
       <input id="restartNameInput" class="textInput" maxlength="20" placeholder="Player name" />
-      <button id="restartBtn" class="btn">Restart</button>
+      <button id="restartBtn" class="btn" type="button">Restart</button>
     </div>
   </div>
 </div>
@@ -306,35 +306,6 @@
   ];
   const RADIANT_INDEX = RANKS.length - 1;
 
-  // External Valorant rank icon URLs (may fail); we'll auto-fallback to SVGs on error
-  const rankIconUrl = {
-    "Iron 1":"https://tracker.gg/valorant/db/images/tiers/1.png",
-    "Iron 2":"https://tracker.gg/valorant/db/images/tiers/2.png",
-    "Iron 3":"https://tracker.gg/valorant/db/images/tiers/3.png",
-    "Bronze 1":"https://tracker.gg/valorant/db/images/tiers/4.png",
-    "Bronze 2":"https://tracker.gg/valorant/db/images/tiers/5.png",
-    "Bronze 3":"https://tracker.gg/valorant/db/images/tiers/6.png",
-    "Silver 1":"https://tracker.gg/valorant/db/images/tiers/7.png",
-    "Silver 2":"https://tracker.gg/valorant/db/images/tiers/8.png",
-    "Silver 3":"https://tracker.gg/valorant/db/images/tiers/9.png",
-    "Gold 1":"https://tracker.gg/valorant/db/images/tiers/10.png",
-    "Gold 2":"https://tracker.gg/valorant/db/images/tiers/11.png",
-    "Gold 3":"https://tracker.gg/valorant/db/images/tiers/12.png",
-    "Platinum 1":"https://tracker.gg/valorant/db/images/tiers/13.png",
-    "Platinum 2":"https://tracker.gg/valorant/db/images/tiers/14.png",
-    "Platinum 3":"https://tracker.gg/valorant/db/images/tiers/15.png",
-    "Diamond 1":"https://tracker.gg/valorant/db/images/tiers/16.png",
-    "Diamond 2":"https://tracker.gg/valorant/db/images/tiers/17.png",
-    "Diamond 3":"https://tracker.gg/valorant/db/images/tiers/18.png",
-    "Ascendant 1":"https://tracker.gg/valorant/db/images/tiers/19.png",
-    "Ascendant 2":"https://tracker.gg/valorant/db/images/tiers/20.png",
-    "Ascendant 3":"https://tracker.gg/valorant/db/images/tiers/21.png",
-    "Immortal 1":"https://tracker.gg/valorant/db/images/tiers/22.png",
-    "Immortal 2":"https://tracker.gg/valorant/db/images/tiers/23.png",
-    "Immortal 3":"https://tracker.gg/valorant/db/images/tiers/24.png",
-    "Radiant":"https://tracker.gg/valorant/db/images/tiers/27.png"
-  };
-
   function rankGroup(idx){
     if (idx === RADIANT_INDEX) return 'Radiant';
     const groups = ['Iron','Bronze','Silver','Gold','Platinum','Diamond','Ascendant','Immortal'];
@@ -370,11 +341,7 @@
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
   }
   function setRankIcon(imgEl, idx){
-    const name = RANKS[idx] || 'Iron 1';
-    const url = rankIconUrl[name];
-    const fallback = rankBadgeDataURI(idx);
-    imgEl.onerror = () => { imgEl.onerror = null; imgEl.src = fallback; };
-    imgEl.src = url || fallback;
+    imgEl.src = rankBadgeDataURI(idx);
   }
 
   /* ========= Helpers ========= */
@@ -434,7 +401,7 @@
     setRankIcon(rankNowIcon, idx);
     rankText.textContent = `Rank: ${RANKS[idx] || 'Unrated'}`;
     rrText.textContent = `RR: ${Math.max(0, Math.min(100, Math.round(rrVal ?? 0)))}`;
-    applyRankTint(idx); // color the player's car by rank
+    applyRankTint(idx);
   }
   async function applyMatchResultAndSave(name, scoreVal, elapsedMs){
     const id = sanitizeId(name);
@@ -477,14 +444,10 @@
       let pos = 1;
       for (const it of items){
         const li = document.createElement('li');
-        const left = document.createElement('div');
-        left.className = 'lb-left';
-        const rankSpan = document.createElement('span');
-        rankSpan.className = 'rank'; rankSpan.textContent = pos;
-        const img = document.createElement('img');
-        img.className = 'rankIcon'; setRankIcon(img, it.rankIndex||0);
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'name'; nameSpan.textContent = it.name || 'Player';
+        const left = document.createElement('div'); left.className = 'lb-left';
+        const rankSpan = document.createElement('span'); rankSpan.className = 'rank'; rankSpan.textContent = pos;
+        const img = document.createElement('img'); img.className = 'rankIcon'; setRankIcon(img, it.rankIndex||0);
+        const nameSpan = document.createElement('span'); nameSpan.className = 'name'; nameSpan.textContent = it.name || 'Player';
         left.appendChild(rankSpan); left.appendChild(img); left.appendChild(nameSpan);
         const scoreSpan = document.createElement('span'); scoreSpan.className = 'score'; scoreSpan.textContent = it.score || 0;
         li.appendChild(left); li.appendChild(scoreSpan); lbList.appendChild(li);
@@ -659,7 +622,7 @@
     const rwingVert = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.7,0.05), bodyMat); rwingVert.position.set(0, 1.0, -2.6); g.add(rwingVert);
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5,1.2,14), bodyMat); nose.rotation.x = Math.PI; nose.position.set(0,0.95,3.5); g.add(nose);
 
-    g.userData.bodyMat = bodyMat; // <-- we will tint this by rank
+    g.userData.bodyMat = bodyMat; // <-- tint target
     return g;
   }
   function makeTailCar(primary=0xff8a00, trim=0x333333){
@@ -740,7 +703,6 @@
 
   /* ---------- 2x XP Gems (rare) ---------- */
   const xpGems = [];
-  const XP_DURATION_MS = 15000;
   function makeGem(){
     const g = new THREE.Group();
     const core = new THREE.Mesh(
@@ -1148,6 +1110,11 @@
   }
 
   /* ========= Start / Restart ========= */
+  function applyRankTintAfterLoad(){
+    // ensure HUD icon + car tint show even before first match
+    setHudRank(prevRankIndex, prevRR);
+  }
+
   async function primeRankSnapshotAndHUD(){
     try{
       const p = await getOrCreatePlayerRank(playerName || 'Player');
@@ -1161,7 +1128,8 @@
     }
   }
 
-  startBtn.addEventListener('click', async () => {
+  startBtn.addEventListener('click', async (ev) => {
+    ev.preventDefault();
     const nm = (nameInput.value || '').trim().substring(0,20);
     if (!nm){ nameInput.focus(); return; }
     playerName = nm; localStorage.setItem('f1snake_name', playerName);
@@ -1180,7 +1148,8 @@
   });
   nameInput.addEventListener('keydown', e=>{ if (e.key==='Enter') startBtn.click(); });
 
-  restartBtn.addEventListener('click', async () => {
+  restartBtn.addEventListener('click', async (ev) => {
+    ev.preventDefault();
     const nm = (restartNameInput.value || '').trim().substring(0,20);
     playerName = nm || playerName || 'Player';
     localStorage.setItem('f1snake_name', playerName);
@@ -1202,6 +1171,7 @@
   (async () => {
     if (playerName){
       await primeRankSnapshotAndHUD();
+      applyRankTintAfterLoad();
     }
   })();
 
