@@ -1114,7 +1114,10 @@
     return g;
   }
   function addKnifeToCamera(){
-    if (knife.group) return;
+    if (knife.group){
+      knife.group.removeFromParent();
+      knife.group = null;
+    }
     knife.group = makeNeonDagger();
     camera.add(knife.group);
     knife.group.position.copy(knife.basePos);
