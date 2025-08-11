@@ -187,7 +187,7 @@
     <span id="rrText">RR: —</span>
   </div>
   <div id="xpBadge"><span class="dot"></span> 2× XP active — <span id="xpTime">00.0s</span></div>
-  <div id="hint">Controls: A/D or ◀️/▶️ • Touch left/right • Double-tap/2-finger = Boost • Press <b>F</b> to inspect</div>
+  <div id="hint">Controls: A/D or ◀️/▶️ • Touch left/right • Double-tap/2-finger = Boost • Press <b>F</b> to spin, <b>V</b> to inspect</div>
 
   <div id="chat">
     <div id="chatHeader">💬 Global Chat</div>
@@ -364,6 +364,10 @@
 </svg>`;
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
   }
+
+  /* ========= Economy ========= */
+  const COINS_PER_POINT = 1;
+
   async function getOrCreatePlayerRank(name){
     const id = sanitizeId(name);
     const ref = db.collection('players').doc(id);
@@ -375,6 +379,7 @@
     }
     return snap.data();
   }
+
   function computeRRDelta(rankIndex, score, elapsedMs){
     const minutes = elapsedMs / 60000;
     const perf = score + Math.min(12, minutes * 1.2);
@@ -392,49 +397,52 @@
     delta = Math.max(-45, Math.min(70, delta));
     return delta;
   }
+
+  // Radiant-uncapped HUD
   function setHudRank(idx, rrVal){
     rankNowIcon.src = rankBadgeDataURI(idx);
     rankText.textContent = `Rank: ${RANKS[idx] || 'Unrated'}`;
-    rrText.textContent = `RR: ${Math.max(0, Math.min(100, Math.round(rrVal ?? 0)))}`;
+    const rr = Math.round(rrVal ?? 0);
+    if (idx === RADIANT_INDEX){
+      rrText.textContent = `Radiant RR: ${rr}`;
+    } else {
+      rrText.textContent = `RR: ${Math.max(0, Math.min(100, rr))}`;
+    }
     setCarColor(rankColor(idx));
   }
 
-  async function applyMatchResultAndSave(scoreVal, elapsedMs){
-  if (!user) return { rankIndex: prevRankIndex, rr: prevRR, delta:0, promos:0, deranks:0 };
-  const ref = db.collection('players').doc(user.uid);
-  const data = (await ref.get()).data() || { rankIndex:0, rr:0 };
+  // Save RR using name-based doc id
+  async function applyMatchResultAndSave(name, scoreVal, elapsedMs){
+    const id = sanitizeId(name);
+    const ref = db.collection('players').doc(id);
+    const data = (await ref.get()).data() || { rankIndex:0, rr:0 };
 
-  let idx = data.rankIndex || 0;
-  let rr  = data.rr || 0;
+    let idx = data.rankIndex || 0;
+    let rr  = data.rr || 0;
 
-  let delta = computeRRDelta(idx, scoreVal, elapsedMs);
-  // Radiant is uncapped, but still a bit “stiff” so gains/losses feel earned
-  if (idx === RADIANT_INDEX){
-    const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
-    delta = clamp(Math.round(delta * 0.5), -40, 40); // tweakable
+    let delta = computeRRDelta(idx, scoreVal, elapsedMs);
+    if (idx === RADIANT_INDEX){
+      const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+      delta = clamp(Math.round(delta * 0.5), -40, 40); // Radiant damping
+    }
+    rr += delta;
+
+    let promos = 0, deranks = 0;
+    while (rr >= 100 && idx < RADIANT_INDEX){ rr -= 100; idx++; promos++; }
+    while (rr < 0 && idx > 0){ rr += 100; idx--; deranks++; }
+    if (idx === 0 && rr < 0) rr = 0;
+
+    await ref.set({
+      name,
+      rankIndex: idx,
+      rr,
+      coins: (data.coins||0) + (scoreVal * COINS_PER_POINT),
+      highScore: Math.max(data.highScore||0, scoreVal||0),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge:true });
+
+    return { rankIndex: idx, rr, delta, promos, deranks };
   }
-  rr += delta;
-
-  let promos = 0, deranks = 0;
-  while (rr >= 100 && idx < RADIANT_INDEX){ rr -= 100; idx++; promos++; }
-  while (rr < 0 && idx > 0){ rr += 100; idx--; deranks++; }
-  if (idx === 0 && rr < 0) rr = 0;
-
-  // ⛔️ REMOVE the old cap line:
-  // if (idx === RADIANT_INDEX && rr > 100) rr = 100;
-
-  await ref.set({
-    rankIndex: idx,
-    rr,
-    coins: (data.coins||0) + (scoreVal * COINS_PER_POINT),
-    highScore: Math.max(data.highScore||0, scoreVal||0),
-    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-  }, { merge:true });
-
-  playerDoc = { ...(playerDoc||{}), rankIndex: idx, rr };
-  return { rankIndex: idx, rr, delta, promos, deranks };
-}
-
 
   // Prevent future duplicates: write one doc per user (id = sanitized name) and keep highest score
   async function upsertHighScore(name, scoreVal, rankIndex){
@@ -890,198 +898,196 @@
     if (car.boost.active && t > car.boost.timer) car.boost.active = false;
   }
 
-  /* ---------- FIRST-PERSON KNIFE ---------- */
   /* ---------- FIRST-PERSON KNIFE (Prime Karambit 2.0) ---------- */
-const knife = {
-  group:null,
-  basePos:new THREE.Vector3(0.74,-0.58,-1.12),
-  baseRot:new THREE.Euler(-0.18, 0.58, 0.26),
-  spin:false, spinStart:0, spinDur:1100,
-  inspect:false, inspectStart:0,
-  trailPool:[],
-};
+  const knife = {
+    group:null,
+    basePos:new THREE.Vector3(0.74,-0.58,-1.12),
+    baseRot:new THREE.Euler(-0.18, 0.58, 0.26),
+    spin:false, spinStart:0, spinDur:1100,
+    inspect:false, inspectStart:0,
+    trailPool:[],
+  };
 
-function makeMatcap(colorHex, gloss=0.9, rough=0.22, emissive=0x000000, emissiveIntensity=0){
-  return new THREE.MeshStandardMaterial({
-    color: colorHex, metalness: gloss, roughness: rough,
-    emissive, emissiveIntensity
-  });
-}
-const MAT_GOLD    = makeMatcap(0xffd166, 1.0, 0.18, 0x3a2500, 0.07);
-const MAT_PEARL   = makeMatcap(0xe8ecf4, 1.0, 0.12);
-const MAT_EDGE    = makeMatcap(0xffffff, 1.0, 0.08);
-const MAT_PURPLE  = makeMatcap(0x6b4bff, 0.65, 0.35, 0x120a3a, 0.09);
-const MAT_GEM     = makeMatcap(0x00e5ff, 0.85, 0.2, 0x007a7a, 0.35);
-
-function makeSpineGlow(){
-  const geo = new THREE.TubeGeometry(
-    new THREE.CatmullRomCurve3(
-      new Array(40).fill(0).map((_,i)=>{
-        const t=i/39, a=t*Math.PI*1.08;
-        return new THREE.Vector3( Math.cos(a)*0.86, Math.sin(a)*0.04, Math.sin(a)*0.04 );
-      })
-    ), 120, 0.015, 8, false
-  );
-  const mat = new THREE.MeshBasicMaterial({ color:0xffc53a, transparent:true, opacity:0.85 });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = Math.PI/2;
-  mesh.rotation.z = Math.PI/2.9 + 0.06;
-  mesh.position.set(0.18, 0.0, 0.06);
-  return mesh;
-}
-
-function makeEnergyRuneRing(){
-  const ring = new THREE.Group();
-  const outer = new THREE.Mesh(new THREE.TorusGeometry(0.195, 0.055, 16, 32), MAT_GOLD);
-  outer.rotation.x = Math.PI/2; outer.position.set(-0.69, 0.02, -0.10); ring.add(outer);
-
-  const gem = new THREE.Mesh(new THREE.IcosahedronGeometry(0.07, 1), MAT_GEM);
-  gem.position.set(-0.69, 0.02, -0.10); ring.add(gem);
-
-  // small orbiting runes
-  for (let i=0;i<6;i++){
-    const s = 0.018 + Math.random()*0.012;
-    const r = new THREE.Mesh(new THREE.TorusGeometry(s*0.9, s*0.4, 6, 10), new THREE.MeshBasicMaterial({color:0xfff0b3}));
-    r.userData.t = Math.random()*Math.PI*2;
-    r.position.set(-0.69, 0.02, -0.10);
-    ring.add(r);
+  function makeMatcap(colorHex, gloss=0.9, rough=0.22, emissive=0x000000, emissiveIntensity=0){
+    return new THREE.MeshStandardMaterial({
+      color: colorHex, metalness: gloss, roughness: rough,
+      emissive, emissiveIntensity
+    });
   }
-  ring.userData.animate = (t)=>{
-    const kids = ring.children;
-    for (let i=2;i<kids.length;i++){
-      kids[i].userData.t += 0.02;
-      const a = kids[i].userData.t + (i*0.6);
-      kids[i].position.x = -0.69 + Math.cos(a)*0.11;
-      kids[i].position.z = -0.10 + Math.sin(a)*0.11;
+  const MAT_GOLD    = makeMatcap(0xffd166, 1.0, 0.18, 0x3a2500, 0.07);
+  const MAT_PEARL   = makeMatcap(0xe8ecf4, 1.0, 0.12);
+  const MAT_EDGE    = makeMatcap(0xffffff, 1.0, 0.08);
+  const MAT_PURPLE  = makeMatcap(0x6b4bff, 0.65, 0.35, 0x120a3a, 0.09);
+  const MAT_GEM     = makeMatcap(0x00e5ff, 0.85, 0.2, 0x007a7a, 0.35);
+
+  function makeSpineGlow(){
+    const geo = new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(
+        new Array(40).fill(0).map((_,i)=>{
+          const t=i/39, a=t*Math.PI*1.08;
+          return new THREE.Vector3( Math.cos(a)*0.86, Math.sin(a)*0.04, Math.sin(a)*0.04 );
+        })
+      ), 120, 0.015, 8, false
+    );
+    const mat = new THREE.MeshBasicMaterial({ color:0xffc53a, transparent:true, opacity:0.85 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = Math.PI/2;
+    mesh.rotation.z = Math.PI/2.9 + 0.06;
+    mesh.position.set(0.18, 0.0, 0.06);
+    return mesh;
+  }
+
+  function makeEnergyRuneRing(){
+    const ring = new THREE.Group();
+    const outer = new THREE.Mesh(new THREE.TorusGeometry(0.195, 0.055, 16, 32), MAT_GOLD);
+    outer.rotation.x = Math.PI/2; outer.position.set(-0.69, 0.02, -0.10); ring.add(outer);
+
+    const gem = new THREE.Mesh(new THREE.IcosahedronGeometry(0.07, 1), MAT_GEM);
+    gem.position.set(-0.69, 0.02, -0.10); ring.add(gem);
+
+    // small orbiting runes
+    for (let i=0;i<6;i++){
+      const s = 0.018 + Math.random()*0.012;
+      const r = new THREE.Mesh(new THREE.TorusGeometry(s*0.9, s*0.4, 6, 10), new THREE.MeshBasicMaterial({color:0xfff0b3}));
+      r.userData.t = Math.random()*Math.PI*2;
+      r.position.set(-0.69, 0.02, -0.10);
+      ring.add(r);
     }
-    gem.rotation.x = t*0.8;
-    gem.rotation.y = t*1.1;
-  };
-  return ring;
-}
-
-function makePrimeKarambit(){
-  const g = new THREE.Group();
-  // blade core
-  const arc = Math.PI * 1.15;
-  const blade = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.09, 26, 160, arc), MAT_PEARL);
-  blade.rotation.x = Math.PI/2; blade.rotation.z = Math.PI/2.9; blade.position.set(0.18, 0.0, 0.06);
-  g.add(blade);
-
-  // keen edge overlay
-  const edge = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.05, 14, 160, arc), MAT_EDGE);
-  edge.rotation.copy(blade.rotation); edge.position.copy(blade.position); edge.scale.set(1.02,1.02,1.02);
-  g.add(edge);
-
-  // gold spine (thin) + animated glow tube
-  const spine = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.022, 10, 120, arc*0.92), MAT_GOLD);
-  spine.rotation.copy(blade.rotation); spine.position.copy(blade.position); spine.rotation.z += 0.06;
-  g.add(spine);
-  const glow = makeSpineGlow(); g.add(glow);
-
-  // grip (angled) with purple ceramic wrap
-  const grip = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.66, 10, 20), MAT_PURPLE);
-  grip.rotation.z = Math.PI/6; grip.position.set(-0.42, -0.02, -0.06); g.add(grip);
-
-  // pommel ring + gem + runes
-  const ring = makeEnergyRuneRing(); g.add(ring);
-
-  g.userData.animate = (t)=>{
-    // subtle pulse along the spine glow
-    glow.material.opacity = 0.72 + Math.sin(t*3.0)*0.12;
-    // rune animation
-    ring.userData.animate?.(t);
-  };
-  return g;
-}
-
-function spawnTrail(){
-  // lightweight trail sprite when spinning
-  const s = 0.22 + Math.random()*0.08;
-  const geo = new THREE.PlaneGeometry(s, s*2.2);
-  const mat = new THREE.MeshBasicMaterial({ color:0xffe08a, transparent:true, opacity:0.55, side:THREE.DoubleSide });
-  const m = new THREE.Mesh(geo, mat);
-  m.rotation.y = Math.random()*Math.PI*2;
-  m.userData.life = 220; // ms
-  knife.trailPool.push(m);
-  camera.add(m);
-  m.position.copy(knife.group.position.clone().add(new THREE.Vector3(-0.08, -0.02, -0.2)));
-}
-
-function attachKnifeToCamera(){
-  if (knife.group) camera.remove(knife.group);
-  knife.group = makePrimeKarambit();
-  camera.add(knife.group);
-  knife.group.position.copy(knife.basePos);
-  knife.group.rotation.copy(knife.baseRot);
-}
-
-function startSpin(){
-  if (!knife.group || knife.spin) return;
-  knife.spin = true; knife.spinStart = performance.now();
-}
-function startInspect(){
-  if (!knife.group || knife.inspect) return;
-  knife.inspect = true; knife.inspectStart = performance.now();
-}
-
-window.addEventListener('keydown', (e)=>{
-  const k = e.key.toLowerCase();
-  if (k === 'f') startSpin();     // quick spin
-  if (k === 'v') startInspect();  // longer inspect
-});
-
-function updateKnife(){
-  if (!knife.group) return;
-  const t = performance.now()*0.001;
-
-  // idle bob
-  knife.group.position.y = knife.basePos.y + Math.sin(t*2.2)*0.01;
-  knife.group.rotation.x = knife.baseRot.x + Math.sin(t*1.6)*0.01;
-
-  // per-frame ornament animation
-  knife.group.children.forEach(c=>c.userData?.animate?.(t));
-
-  // spin
-  if (knife.spin){
-    const now = performance.now();
-    const p = Math.min(1, (now - knife.spinStart)/knife.spinDur);
-    const ease = (x)=>x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
-    const a = ease(p) * Math.PI*2.2;
-    knife.group.rotation.y = knife.baseRot.y + a;
-    if (Math.random() < 0.25) spawnTrail();
-    if (p >= 1){ knife.spin = false; }
-  } else {
-    knife.group.rotation.y = THREE.MathUtils.damp(knife.group.rotation.y, knife.baseRot.y, 8, 1/60);
+    ring.userData.animate = (t)=>{
+      const kids = ring.children;
+      for (let i=2;i<kids.length;i++){
+        kids[i].userData.t += 0.02;
+        const a = kids[i].userData.t + (i*0.6);
+        kids[i].position.x = -0.69 + Math.cos(a)*0.11;
+        kids[i].position.z = -0.10 + Math.sin(a)*0.11;
+      }
+      gem.rotation.x = t*0.8;
+      gem.rotation.y = t*1.1;
+    };
+    return ring;
   }
 
-  // inspect (slow tilt + hold at edge)
-  if (knife.inspect){
-    const now = performance.now();
-    const tSec = (now - knife.inspectStart)/1000;
-    const swing = Math.min(1, tSec/0.35);
-    knife.group.rotation.z = knife.baseRot.z + swing*0.85;
-    knife.group.position.x = knife.basePos.x - swing*0.15;
-    if (tSec > 1.1){ knife.inspect = false; }
-  } else {
-    knife.group.rotation.z = THREE.MathUtils.damp(knife.group.rotation.z, knife.baseRot.z, 8, 1/60);
-    knife.group.position.x  = THREE.MathUtils.damp(knife.group.position.x, knife.basePos.x, 8, 1/60);
+  function makePrimeKarambit(){
+    const g = new THREE.Group();
+    // blade core
+    const arc = Math.PI * 1.15;
+    const blade = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.09, 26, 160, arc), MAT_PEARL);
+    blade.rotation.x = Math.PI/2; blade.rotation.z = Math.PI/2.9; blade.position.set(0.18, 0.0, 0.06);
+    g.add(blade);
+
+    // keen edge overlay
+    const edge = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.05, 14, 160, arc), MAT_EDGE);
+    edge.rotation.copy(blade.rotation); edge.position.copy(blade.position); edge.scale.set(1.02,1.02,1.02);
+    g.add(edge);
+
+    // gold spine (thin) + animated glow tube
+    const spine = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.022, 10, 120, arc*0.92), MAT_GOLD);
+    spine.rotation.copy(blade.rotation); spine.position.copy(blade.position); spine.rotation.z += 0.06;
+    g.add(spine);
+    const glow = makeSpineGlow(); g.add(glow);
+
+    // grip (angled) with purple ceramic wrap
+    const grip = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.66, 10, 20), MAT_PURPLE);
+    grip.rotation.z = Math.PI/6; grip.position.set(-0.42, -0.02, -0.06); g.add(grip);
+
+    // pommel ring + gem + runes
+    const ring = makeEnergyRuneRing(); g.add(ring);
+
+    g.userData.animate = (t)=>{
+      // subtle pulse along the spine glow
+      glow.material.opacity = 0.72 + Math.sin(t*3.0)*0.12;
+      // rune animation
+      ring.userData.animate?.(t);
+    };
+    return g;
   }
 
-  // trail fade/update
-  for (let i=knife.trailPool.length-1;i>=0;i--){
-    const m = knife.trailPool[i];
-    m.userData.life -= 1000/60;
-    m.material.opacity *= 0.92;
-    m.position.z -= 0.03;
-    m.scale.multiplyScalar(0.985);
-    if (m.userData.life <= 0){ camera.remove(m); knife.trailPool.splice(i,1); }
+  function spawnTrail(){
+    // lightweight trail sprite when spinning
+    const s = 0.22 + Math.random()*0.08;
+    const geo = new THREE.PlaneGeometry(s, s*2.2);
+    const mat = new THREE.MeshBasicMaterial({ color:0xffe08a, transparent:true, opacity:0.55, side:THREE.DoubleSide });
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.y = Math.random()*Math.PI*2;
+    m.userData.life = 220; // ms
+    knife.trailPool.push(m);
+    camera.add(m);
+    m.position.copy(knife.group.position.clone().add(new THREE.Vector3(-0.08, -0.02, -0.2)));
   }
-}
 
-// call once after camera is created:
-attachKnifeToCamera();
+  function attachKnifeToCamera(){
+    if (knife.group) camera.remove(knife.group);
+    knife.group = makePrimeKarambit();
+    camera.add(knife.group);
+    knife.group.position.copy(knife.basePos);
+    knife.group.rotation.copy(knife.baseRot);
+  }
 
+  function startSpin(){
+    if (!knife.group || knife.spin) return;
+    knife.spin = true; knife.spinStart = performance.now();
+  }
+  function startInspect(){
+    if (!knife.group || knife.inspect) return;
+    knife.inspect = true; knife.inspectStart = performance.now();
+  }
+
+  window.addEventListener('keydown', (e)=>{
+    const k = e.key.toLowerCase();
+    if (k === 'f') startSpin();     // quick spin
+    if (k === 'v') startInspect();  // longer inspect
+  });
+
+  function updateKnife(){
+    if (!knife.group) return;
+    const t = performance.now()*0.001;
+
+    // idle bob
+    knife.group.position.y = knife.basePos.y + Math.sin(t*2.2)*0.01;
+    knife.group.rotation.x = knife.baseRot.x + Math.sin(t*1.6)*0.01;
+
+    // per-frame ornament animation
+    knife.group.children.forEach(c=>c.userData?.animate?.(t));
+
+    // spin
+    if (knife.spin){
+      const now = performance.now();
+      const p = Math.min(1, (now - knife.spinStart)/knife.spinDur);
+      const ease = (x)=>x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+      const a = ease(p) * Math.PI*2.2;
+      knife.group.rotation.y = knife.baseRot.y + a;
+      if (Math.random() < 0.25) spawnTrail();
+      if (p >= 1){ knife.spin = false; }
+    } else {
+      knife.group.rotation.y = THREE.MathUtils.damp(knife.group.rotation.y, knife.baseRot.y, 8, 1/60);
+    }
+
+    // inspect (slow tilt + hold at edge)
+    if (knife.inspect){
+      const now = performance.now();
+      const tSec = (now - knife.inspectStart)/1000;
+      const swing = Math.min(1, tSec/0.35);
+      knife.group.rotation.z = knife.baseRot.z + swing*0.85;
+      knife.group.position.x = knife.basePos.x - swing*0.15;
+      if (tSec > 1.1){ knife.inspect = false; }
+    } else {
+      knife.group.rotation.z = THREE.MathUtils.damp(knife.group.rotation.z, knife.baseRot.z, 8, 1/60);
+      knife.group.position.x  = THREE.MathUtils.damp(knife.group.position.x, knife.basePos.x, 8, 1/60);
+    }
+
+    // trail fade/update
+    for (let i=knife.trailPool.length-1;i>=0;i--){
+      const m = knife.trailPool[i];
+      m.userData.life -= 1000/60;
+      m.material.opacity *= 0.92;
+      m.position.z -= 0.03;
+      m.scale.multiplyScalar(0.985);
+      if (m.userData.life <= 0){ camera.remove(m); knife.trailPool.splice(i,1); }
+    }
+  }
+
+  // call once after camera is created:
+  attachKnifeToCamera();
 
   /* ========= Helpers: spawn position & grace ========= */
   function setStartPosition(){
@@ -1262,18 +1268,14 @@ attachKnifeToCamera();
     }
   }
 
-  function setHudRank(idx, rrVal){
-  rankNowIcon.src = rankBadgeDataURI(idx);
-  rankText.textContent = `Rank: ${RANKS[idx] || 'Unrated'}`;
-  const rr = Math.round(rrVal ?? 0);
-  if (idx === RADIANT_INDEX){
-    rrText.textContent = `Radiant RR: ${rr}`; // uncapped display
-  } else {
-    rrText.textContent = `RR: ${Math.max(0, Math.min(100, rr))}`; // normal 0–100
+  function showRankUpAnimation(idx, promos){
+    rankUpBadge.src = rankBadgeDataURI(idx, true);
+    rankUpText.textContent = promos >= 2 ? 'DOUBLE PROMOTION!' : 'RANK UP!';
+    rankUpOverlay.style.display = 'grid';
+    const rect = rankUpOverlay.getBoundingClientRect();
+    spawnBursts(rect.width/2, rect.height/2, promos >= 2 ? 60 : 36);
+    setTimeout(() => { rankUpOverlay.style.display = 'none'; }, 1100);
   }
-  setCarColor(rankColor(idx));
-}
-
 
   async function doGameOver(){
     if (!alive) return;
@@ -1349,7 +1351,7 @@ attachKnifeToCamera();
     chatBox.style.display = 'flex';
     startOverlay.style.display = 'none';
     alive = true;
-    addKnifeToCamera();
+    attachKnifeToCamera();
   });
   nameInput.addEventListener('keydown', e=>{ if (e.key==='Enter') startBtn.click(); });
 
@@ -1368,7 +1370,7 @@ attachKnifeToCamera();
     for (const o of obstacles){ o.mesh.position.copy(o.base); }
     restartOverlay.style.display = 'none';
     alive = true;
-    addKnifeToCamera();
+    attachKnifeToCamera();
   });
 
   // Start listeners/render
@@ -1383,4 +1385,3 @@ attachKnifeToCamera();
 </script>
 </body>
 </html>
-
