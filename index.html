@@ -1090,28 +1090,27 @@
     group:null, basePos:new THREE.Vector3(0.7,-0.55,-1.1), baseRot:new THREE.Euler(-0.15, 0.55, 0.25),
     spin:false, spinStart:0, spinDur:1200
   };
-  function bladeMaterial(){
-    return new THREE.MeshStandardMaterial({color:0xdddddd, metalness:0.7, roughness:0.3});
+  function neonBladeMaterial(){
+    return new THREE.MeshStandardMaterial({
+      color:0x00eaff, metalness:0.9, roughness:0.2,
+      emissive:0x0088ff, emissiveIntensity:0.8
+    });
   }
   function handleMaterial(){
-    return new THREE.MeshStandardMaterial({color:0x444444, metalness:0.3, roughness:0.8});
+    return new THREE.MeshStandardMaterial({color:0x222222, metalness:0.4, roughness:0.7});
   }
 
-  // Simpler first-person knife model
-  function makeSimpleKnife(){
+  // Revamped first-person knife
+  function makeNeonDagger(){
     const g = new THREE.Group();
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.01, 0.9), bladeMaterial());
-    blade.position.set(0, 0, 0.45);
-    blade.rotation.x = Math.PI/2;
-    g.add(blade);
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.2, 4), bladeMaterial());
-    tip.rotation.x = Math.PI/2;
-    tip.position.set(0, 0, 0.9);
-    g.add(tip);
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8), handleMaterial());
-    handle.rotation.x = Math.PI/2;
-    handle.position.set(0, 0, -0.15);
-    g.add(handle);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 1.1), neonBladeMaterial());
+    blade.position.set(0, 0, 0.45); blade.rotation.x = Math.PI/2; g.add(blade);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.25, 12), neonBladeMaterial());
+    tip.rotation.x = Math.PI/2; tip.position.set(0, 0, 1.0); g.add(tip);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.5, 16), handleMaterial());
+    handle.rotation.x = Math.PI/2; handle.position.set(0, 0, -0.25); g.add(handle);
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.1), handleMaterial());
+    guard.rotation.x = Math.PI/2; guard.position.set(0, 0, 0); g.add(guard);
     return g;
   }
   function addKnifeToCamera(){
@@ -1119,7 +1118,7 @@
       knife.group.removeFromParent();
       knife.group = null;
     }
-    knife.group = makeSimpleKnife();
+    knife.group = makeNeonDagger();
     camera.add(knife.group);
     knife.group.position.copy(knife.basePos);
     knife.group.rotation.copy(knife.baseRot);
