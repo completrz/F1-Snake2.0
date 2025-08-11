@@ -277,6 +277,8 @@
   };
   firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
+  // Ensure the session persists between rounds
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(console.error);
   const db = firebase.firestore();
 
   /* ========= DOM ========= */
@@ -366,9 +368,11 @@
     user = u || null;
     if (!user){
       coinsBadge.style.display = 'none';
+      googleBtn.style.display = 'inline-block';
       lobbyOverlay.style.display = 'grid';
       return;
     }
+    googleBtn.style.display = 'none';
     // Ensure player doc
     const ref = db.collection('players').doc(user.uid);
     const snap = await ref.get();
@@ -466,7 +470,7 @@
         {id:'paint_purple', name:'Purple Body', type:'body', price:200, rarity:'rare', icon:'🎨', color:'#8a5cff', active:true},
         {id:'paint_red', name:'Immortal Red', type:'body', price:220, rarity:'rare', icon:'🎨', color:'#ff4b4b', active:true},
         {id:'trail_basic', name:'Basic Trail', type:'trail', price:120, rarity:'common', icon:'🌀', active:true},
-        {id:'knife_prime', name:'Prime Gold', type:'knife', price:400, rarity:'epic', icon:'🔪', active:true},
+        {id:'knife_neon', name:'Neon Dagger', type:'knife', price:400, rarity:'epic', icon:'🔪', active:true},
         {id:'boost_xp2', name:'2× XP (1 game)', type:'boost', price:150, rarity:'legendary', icon:'⚡', active:true}
       ];
     }
@@ -1086,43 +1090,35 @@
     group:null, basePos:new THREE.Vector3(0.7,-0.55,-1.1), baseRot:new THREE.Euler(-0.15, 0.55, 0.25),
     spin:false, spinStart:0, spinDur:1200
   };
-  function goldMaterial(){ return new THREE.MeshStandardMaterial({color:0xffd76b, metalness:1.0, roughness:0.25, emissive:0x2a2205, emissiveIntensity:0.05}); }
-  function purpleMaterial(){ return new THREE.MeshStandardMaterial({color:0x6b4bff, metalness:0.6, roughness:0.35, emissive:0x120a3a, emissiveIntensity:0.08}); }
-  function bladeMaterial(){ return new THREE.MeshStandardMaterial({color:0xe8e8f0, metalness:1.0, roughness:0.16}); }
-  function edgeMaterial(){ return new THREE.MeshStandardMaterial({color:0xffffff, metalness:1.0, roughness:0.08}); }
+  function neonBladeMaterial(){
+    return new THREE.MeshStandardMaterial({
+      color:0x00eaff, metalness:0.9, roughness:0.2,
+      emissive:0x0088ff, emissiveIntensity:0.8
+    });
+  }
+  function handleMaterial(){
+    return new THREE.MeshStandardMaterial({color:0x222222, metalness:0.4, roughness:0.7});
+  }
 
-  function makePrimeKarambit(){
+  // Revamped first-person knife
+  function makeNeonDagger(){
     const g = new THREE.Group();
-    const arc = Math.PI * 1.15;
-    const bladeGeo = new THREE.TorusGeometry(0.9, 0.09, 20, 120, arc);
-    const blade = new THREE.Mesh(bladeGeo, bladeMaterial());
-    blade.rotation.x = Math.PI/2; blade.rotation.z = Math.PI/2.9; blade.position.set(0.18, 0.0, 0.06); g.add(blade);
-    const edgeGeo = new THREE.TorusGeometry(0.9, 0.05, 12, 120, arc);
-    const edge = new THREE.Mesh(edgeGeo, edgeMaterial());
-    edge.rotation.copy(blade.rotation); edge.position.copy(blade.position); edge.scale.set(1.02,1.02,1.02); g.add(edge);
-    const spineGeo = new THREE.TorusGeometry(0.88, 0.02, 8, 80, arc*0.92);
-    const spine = new THREE.Mesh(spineGeo, goldMaterial());
-    spine.rotation.copy(blade.rotation); spine.position.copy(blade.position); spine.rotation.z += 0.06; g.add(spine);
-    const grip = new THREE.Mesh(new THREE.CapsuleGeometry(0.10, 0.6, 8, 16), purpleMaterial());
-    grip.rotation.z = Math.PI/6; grip.position.set(-0.42, -0.02, -0.06); g.add(grip);
-    const ringOuter = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.055, 16, 24), goldMaterial());
-    ringOuter.rotation.x = Math.PI/2; ringOuter.position.set(-0.68, 0.02, -0.10); g.add(ringOuter);
-    const ringInner = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.025, 12, 20), purpleMaterial());
-    ringInner.rotation.x = Math.PI/2; ringInner.position.copy(ringOuter.position); g.add(ringInner);
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.14, 0.32), goldMaterial());
-    guard.rotation.z = Math.PI/6; guard.position.set(-0.24, -0.03, -0.05); g.add(guard);
-    const emblem = new THREE.Mesh(new THREE.CircleGeometry(0.08, 20), goldMaterial());
-    emblem.rotation.y = Math.PI/2; emblem.position.set(-0.12, 0.02, -0.06); g.add(emblem);
-    const screwMat = new THREE.MeshStandardMaterial({color:0xcfd2d7, metalness:0.9, roughness:0.2});
-    for (let i=0;i<2;i++){ const s = new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,0.06,12), screwMat); s.rotation.x = Math.PI/2; s.position.set(-0.30 + 0.16*i, 0.05, -0.06); g.add(s); }
-    const glow = new THREE.Mesh(new THREE.BoxGeometry(0.06,0.02,0.36),
-      new THREE.MeshStandardMaterial({color:0xbdd4ff, emissive:0x7bb1ff, emissiveIntensity:0.7, metalness:0.3, roughness:0.6}));
-    glow.rotation.z = Math.PI/6; glow.position.set(-0.38, 0.07, -0.05); g.add(glow);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 1.1), neonBladeMaterial());
+    blade.position.set(0, 0, 0.45); blade.rotation.x = Math.PI/2; g.add(blade);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.25, 12), neonBladeMaterial());
+    tip.rotation.x = Math.PI/2; tip.position.set(0, 0, 1.0); g.add(tip);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.5, 16), handleMaterial());
+    handle.rotation.x = Math.PI/2; handle.position.set(0, 0, -0.25); g.add(handle);
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.1), handleMaterial());
+    guard.rotation.x = Math.PI/2; guard.position.set(0, 0, 0); g.add(guard);
     return g;
   }
   function addKnifeToCamera(){
-    if (knife.group) return;
-    knife.group = makePrimeKarambit();
+    if (knife.group){
+      knife.group.removeFromParent();
+      knife.group = null;
+    }
+    knife.group = makeNeonDagger();
     camera.add(knife.group);
     knife.group.position.copy(knife.basePos);
     knife.group.rotation.copy(knife.baseRot);
