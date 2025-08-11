@@ -92,6 +92,27 @@
   #modeSelect{ padding: 10px 12px; border-radius: 10px; border:1px solid rgba(255,255,255,.12); background:#0f1620; color:#fff; font-size:15px; }
   .tag{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); }
 
+  /* Item Shop */
+  #shopOverlay .shop-wrap{ display:flex; flex-direction:column; gap:12px; }
+  #shopHeader{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+  #shopBalance{ font-weight:800; background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); padding:6px 10px; border-radius:999px; }
+  #shopTabs{ display:flex; gap:8px; flex-wrap:wrap; }
+  .shopTab{ padding:8px 10px; border-radius:10px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); cursor:pointer; font-weight:700; }
+  .shopTab.active{ background: rgba(0,229,255,0.18); border-color: rgba(0,229,255,0.35); }
+  #shopGrid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:12px; max-height: 420px; overflow:auto; }
+  .shopCard{ background: rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:8px; }
+  .shopTitle{ font-weight:800; font-size:14px; }
+  .shopMeta{ display:flex; align-items:center; justify-content:space-between; font-size:12px; opacity:.9; }
+  .price{ font-weight:800; }
+  .ownTag{ font-size:11px; padding:2px 6px; border-radius:999px; background:rgba(80,255,120,0.15); border:1px solid rgba(80,255,120,0.4); }
+  .buyBtn, .equipBtn{ padding:8px 10px; border:none; border-radius:10px; cursor:pointer; font-weight:800; }
+  .buyBtn{ background:linear-gradient(90deg,#ffd24d,#ffb700); color:#111; }
+  .equipBtn{ background:linear-gradient(90deg,#00c6ff,#0072ff); color:#001318; }
+  .rarity{ font-weight:800; font-size:11px; padding:2px 6px; border-radius:999px; }
+  .r-common{ background:rgba(255,255,255,0.09); }
+  .r-rare{ background:rgba(0,200,255,0.18); }
+  .r-epic{ background:rgba(180,100,255,0.22); }
+  .r-legendary{ background:rgba(255,210,77,0.25); }
 </style>
 
 <!-- Firebase -->
@@ -147,12 +168,41 @@
         <select id="modeSelect" disabled>
           <option value="classic">Classic (current)</option>
         </select>
-        <span class="tag" title="Coming soon">Item Shop — Soon</span>
+        <button id=\"shopOpenFromLobby\" class=\"btn\" type=\"button\">Open Item Shop</button>
       </div>
       <div class="inputRow">
         <button id="playBtn" class="btn" disabled>Play</button>
       </div>
       <div class="small" id="lobbyInfo">Not signed in.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Item Shop overlay -->
+<div id="shopOverlay" class="overlay" style="display:none;">
+  <div class="panel" style="width:min(840px,92vw); text-align:left;">
+    <div class="shop-wrap">
+      <div id="shopHeader">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="title" style="margin:0; font-size:22px;">Item Shop</div>
+          <span id="shopModeTag" class="tag">Classic</span>
+        </div>
+        <div>
+          <span id="shopBalance">Coins: <span id="coinAmt">0</span></span>
+        </div>
+      </div>
+      <div id="shopTabs">
+        <div class="shopTab active" data-cat="all">All</div>
+        <div class="shopTab" data-cat="body">Body Paints</div>
+        <div class="shopTab" data-cat="trail">Trails</div>
+        <div class="shopTab" data-cat="knife">Knife Skins</div>
+        <div class="shopTab" data-cat="boost">Boosts</div>
+      </div>
+      <div id="shopGrid"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="closeShopBtn" class="btn" type="button">Close</button>
+      </div>
+      <div class="small">Purchases are tied to your Google account (UID). Prices and availability are placeholder for development.</div>
     </div>
   </div>
 </div>
@@ -208,6 +258,14 @@
   const modeSelect = document.getElementById('modeSelect');
   const playBtn = document.getElementById('playBtn');
   const lobbyInfo = document.getElementById('lobbyInfo');
+  const shopOpenFromLobby = document.getElementById('shopOpenFromLobby');
+
+  // Shop DOM
+  const shopOverlay = document.getElementById('shopOverlay');
+  const shopGrid = document.getElementById('shopGrid');
+  const closeShopBtn = document.getElementById('closeShopBtn');
+  const shopTabsEl = document.getElementById('shopTabs');
+  const coinAmtEl = document.getElementById('coinAmt');
 
   const restartOverlay = document.getElementById('restartOverlay');
   const restartNameInput = document.getElementById('restartNameInput');
@@ -252,6 +310,14 @@
 
   let prevRankIndex = 0;
   let prevRR = 0;
+
+  // Economy / Shop state
+  let coins = 0;
+  let owned = new Set(); // item ids
+  let equipped = { body:null, trail:null, knife:null };
+  let shopItems = []; // fetched from Firestore
+  let shopCat = 'all';
+  const COINS_PER_POINT = 1; // award on game over
 
   let xpMultActive = false;
   let xpMultUntil = 0;
@@ -342,7 +408,12 @@
     const ref = db.collection('players').doc(uid);
     const snap = await ref.get();
     if (!snap.exists){
-      const data = { uid, name: sanitizeName(displayName||'Player'), rankIndex: 0, rr: 0, highScore: 0, gamesPlayed: 0, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+      const data = { uid, name: sanitizeName(displayName||'Player'), rankIndex: 0, rr: 0, highScore: 0, gamesPlayed: 0, coins: 500, equipped: { body:null, trail:null, knife:null }, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+      await ref.set(data);
+      return data;
+    }
+    return snap.data();
+  };
       await ref.set(data);
       return data;
     }
@@ -350,11 +421,12 @@
   }
 
   function enableLobbyPostSignIn(profile){
-    usernameInput.disabled = false;
-    modeSelect.disabled = false;
-    playBtn.disabled = false;
+    usernameInput.disabled = false; modeSelect.disabled = false; playBtn.disabled = false;
     usernameInput.value = profile.name || '';
-    lobbyInfo.textContent = `Signed in as ${profile.name}`;
+    coins = profile.coins || 0; equipped = profile.equipped || {body:null, trail:null, knife:null};
+    lobbyInfo.textContent = `Signed in as ${profile.name} • Coins: ${coins}`;
+    coinAmtEl.textContent = coins;
+  }`;
   }
 
   googleBtn.addEventListener('click', async ()=>{
@@ -387,6 +459,11 @@
     alive = true;
     addKnifeToCamera();
 
+    await ensureLeaderboardRow();
+    lastLiveWrite = 0; // reset debounce
+    writeLiveScore(true);
+  });
+
     // init live score row
     await ensureLeaderboardRow();
     lastLiveWrite = 0; // reset debounce
@@ -405,6 +482,95 @@
         currentTab = tab.getAttribute('data-tab');
         lbTitle.textContent = currentTab==='live' ? 'Top 10 — Live Leaderboard' : 'Top 10 — All‑Time High Scores';
         startLeaderboardListener();
+
+  // ===== Item Shop Logic =====
+  shopOpenFromLobby?.addEventListener('click', ()=>{ openShop(); });
+  closeShopBtn.addEventListener('click', ()=>{ closeShop(); });
+  shopTabsEl.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.shopTab'); if (!btn) return;
+    [...shopTabsEl.children].forEach(n=>n.classList.remove('active')); btn.classList.add('active');
+    shopCat = btn.getAttribute('data-cat') || 'all';
+    renderShop();
+  });
+
+  async function loadShop(){
+    // fetch active items
+    const snap = await db.collection('shop').where('active','==',true).get().catch(()=>null);
+    if (snap && !snap.empty){ shopItems = snap.docs.map(d=>({id:d.id, ...d.data()})); }
+    else {
+      // fallback local items (no write)
+      shopItems = [
+        {id:'paint_purple', name:'Purple Body', type:'body', price:200, rarity:'rare', icon:'🎨', color:'#8a5cff', active:true},
+        {id:'paint_red', name:'Immortal Red', type:'body', price:220, rarity:'rare', icon:'🎨', color:'#ff4b4b', active:true},
+        {id:'trail_basic', name:'Basic Trail', type:'trail', price:120, rarity:'common', icon:'🌀', active:true},
+        {id:'knife_prime', name:'Prime Gold', type:'knife', price:400, rarity:'epic', icon:'🔪', active:true},
+        {id:'boost_xp2', name:'2× XP (1 game)', type:'boost', price:150, rarity:'legendary', icon:'⚡', active:true}
+      ];
+    }
+    await loadInventory();
+    renderShop();
+  }
+  async function loadInventory(){
+    owned = new Set();
+    if (!currentUser) return;
+    const invSnap = await db.collection('players').doc(currentUser.uid).collection('inventory').get().catch(()=>null);
+    if (invSnap){ invSnap.forEach(d=>{ if (d.data()?.owned) owned.add(d.id); }); }
+    const prof = (await db.collection('players').doc(currentUser.uid).get()).data();
+    coins = prof?.coins || 0; equipped = prof?.equipped || {body:null, trail:null, knife:null};
+    coinAmtEl.textContent = coins; lobbyInfo.textContent = `Signed in as ${playerName} • Coins: ${coins}`;
+  }
+  function openShop(){ if (!currentUser){ lobbyInfo.textContent = 'Please sign in first.'; return; } loadShop(); shopOverlay.style.display='grid'; }
+  function closeShop(){ shopOverlay.style.display='none'; }
+  function rarityClass(r){ return r ? 'r-'+r.toLowerCase() : 'r-common'; }
+  function renderShop(){
+    const items = shopCat==='all' ? shopItems : shopItems.filter(i=>i.type===shopCat);
+    shopGrid.innerHTML = '';
+    for (const it of items){
+      const card = document.createElement('div'); card.className='shopCard';
+      const title = document.createElement('div'); title.className='shopTitle'; title.textContent = `${it.icon||''} ${it.name}`; card.appendChild(title);
+      const meta = document.createElement('div'); meta.className='shopMeta';
+      const rar = document.createElement('span'); rar.className = `rarity ${rarityClass(it.rarity)}`; rar.textContent = it.rarity||'Common';
+      const price = document.createElement('span'); price.className='price'; price.textContent = `${it.price}c`;
+      meta.appendChild(rar); meta.appendChild(price); card.appendChild(meta);
+      const actions = document.createElement('div'); actions.style.display='flex'; actions.style.gap='8px';
+      if (owned.has(it.id)){
+        const own = document.createElement('span'); own.className='ownTag'; own.textContent='Owned'; actions.appendChild(own);
+        if (['body','trail','knife'].includes(it.type)){
+          const eq = document.createElement('button'); eq.className='equipBtn'; eq.textContent='Equip'; eq.addEventListener('click', ()=>equipItem(it)); actions.appendChild(eq);
+        }
+      } else {
+        const buy = document.createElement('button'); buy.className='buyBtn'; buy.textContent='Buy'; buy.addEventListener('click', ()=>purchaseItem(it)); actions.appendChild(buy);
+      }
+      card.appendChild(actions);
+      shopGrid.appendChild(card);
+    }
+  }
+  async function purchaseItem(it){
+    if (!currentUser) return;
+    try{
+      await db.runTransaction(async tx=>{
+        const pRef = db.collection('players').doc(currentUser.uid);
+        const pSnap = await tx.get(pRef);
+        const pdata = pSnap.exists ? pSnap.data() : { coins:0 };
+        if ((pdata.coins||0) < it.price) throw new Error('Not enough coins');
+        tx.update(pRef, { coins: (pdata.coins||0) - it.price, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        const invRef = pRef.collection('inventory').doc(it.id);
+        tx.set(invRef, { owned: true, acquiredAt: firebase.firestore.FieldValue.serverTimestamp(), item: {name:it.name, type:it.type} });
+      });
+      await loadInventory(); renderShop();
+    }catch(e){ console.warn('purchase failed', e); alert(e.message||'Purchase failed'); }
+  }
+  async function equipItem(it){
+    if (!currentUser) return;
+    try{
+      const key = it.type; if (!['body','trail','knife'].includes(key)) return;
+      const update = {}; update[`equipped.${key}`] = it.id;
+      await db.collection('players').doc(currentUser.uid).set({ ...update, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+      equipped[key] = it.id;
+      if (key==='body' && it.color){ setCarColor(it.color); }
+      renderShop();
+    }catch(e){ console.warn('equip failed', e); }
+  }
       });
     });
   }
@@ -721,7 +887,13 @@
     const prevIdx = prevRankIndex; const prevRRLocal = prevRR;
     let result = null;
     try{
-      if (currentUser){ result = await applyMatchResultAndSave(currentUser.uid, playerName || 'Player', score, elapsed); await finalizeScore(); }
+      if (currentUser){
+        result = await applyMatchResultAndSave(currentUser.uid, playerName || 'Player', score, elapsed);
+        await finalizeScore();
+        const award = Math.max(0, Math.round(score * COINS_PER_POINT));
+        await db.collection('players').doc(currentUser.uid).set({ coins: firebase.firestore.FieldValue.increment(award) }, {merge:true});
+        coins += award; coinAmtEl.textContent = coins; lobbyInfo.textContent = `Signed in as ${playerName} • Coins: ${coins}`;
+      }
     }catch(e){ console.error('Rank/leaderboard update failed', e); }
 
     const newIdx = result ? result.rankIndex : prevIdx; const newRR = result ? result.rr : prevRRLocal; setHudRank(newIdx, newRR);
@@ -731,6 +903,7 @@
     if (result){ if (result.promos > 0){ promoNoteEl.textContent = result.promos >= 2 ? '🔥 Double promotion!' : '⭐ Promotion!'; showRankUpAnimation(newIdx, result.promos); } else if (result.deranks > 0){ promoNoteEl.textContent = '⬇ Downranked.'; } }
 
     document.getElementById('finalScore').textContent = score; restartNameInput.value = playerName || ''; restartOverlay.style.display = 'grid';
+  }
   }
 
   async function primeRankSnapshotAndHUD(){
@@ -757,7 +930,8 @@
 
   // Show lobby on load unless already signed in
   auth.onAuthStateChanged(async (user)=>{
-    if (user){ currentUser = user; playerDocId = user.uid; const profile = await getOrCreatePlayer(playerDocId, user.displayName || 'Player'); playerName = profile.name; enableLobbyPostSignIn(profile); await primeRankSnapshotAndHUD(); } else { lobbyInfo.textContent = 'Not signed in.'; usernameInput.disabled=true; modeSelect.disabled=true; playBtn.disabled=true; }
+    if (user){ currentUser = user; playerDocId = user.uid; const profile = await getOrCreatePlayer(playerDocId, user.displayName || 'Player'); playerName = profile.name; coins = profile.coins||0; equipped = profile.equipped||{body:null, trail:null, knife:null}; enableLobbyPostSignIn(profile); await primeRankSnapshotAndHUD(); } else { lobbyInfo.textContent = 'Not signed in.'; usernameInput.disabled=true; modeSelect.disabled=true; playBtn.disabled=true; coins=0; equipped={body:null, trail:null, knife:null}; }
+    coinAmtEl.textContent = coins;
     lobbyOverlay.style.display = 'grid';
   });
 })();
