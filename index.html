@@ -561,7 +561,7 @@
     tabAll.classList.toggle('active',  view==='all');
     if (lbUnsub){ lbUnsub(); lbUnsub = null; }
     const col = (view==='live') ? 'liveScore' : 'highScore';
-    lbUnsub = db.collection('leaderboard').orderBy(col,'desc').limit(100).onSnapshot(async snap=>{
+    lbUnsub = db.collection('leaderboard').orderBy(col,'desc').onSnapshot(async snap=>{
       const items = [];
       snap.forEach(doc=>{
         const d = doc.data() || {};
@@ -582,7 +582,7 @@
       lbList.appendChild(li);
       return;
     }
-    items.slice(0,10).forEach((it, i)=>{
+    items.forEach((it, i)=>{
       const li = document.createElement('li');
       const left = document.createElement('div');
       left.className = 'lb-left';
