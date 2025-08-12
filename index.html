@@ -154,12 +154,11 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
 
-<!-- Three.js -->
-  <!-- GLTF + DRACO loaders (global THREE.* style for non-module builds) -->
-<script src="https://unpkg.com/three@0.154.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://unpkg.com/three@0.154.0/examples/js/loaders/DRACOLoader.js"></script>
-
+<!-- Three.js core (must be FIRST) -->
 <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
+<!-- Examples loaders (need THREE to exist) -->
+<script src="https://unpkg.com/three@0.154.0/examples/js/loaders/DRACOLoader.js"></script>
+<script src="https://unpkg.com/three@0.154.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 
@@ -190,7 +189,7 @@
     <div id="lbHeader"><span class="dot"></span><h3>Leaderboard</h3></div>
     <div id="lbTabs">
       <div id="tabLive" class="lbTab active">Live</div>
-      <div id="tabAll" class="lbTab">All‑Time</div>
+      <div id="tabAll" class="lbTab">All-Time</div>
     </div>
     <ul id="lbList"><li><div class="lb-left"><span class="rank">–</span><img class="rankIcon" alt="" /><span class="name">Loading…</span></div><span class="score">–</span></li></ul>
   </div>
@@ -267,8 +266,12 @@
     </div>
   </div>
 </div>
+
+<!-- Set model path: keep as relative file in same folder, or replace with your GitHub Pages URL -->
 <script>
-  window.KNIFE_URL = 'https://<completrz>.github.io/<F1-Snake2.0>/karambit_prime_valorant.glb';
+  window.KNIFE_URL = './karambit_prime_valorant.glb';
+  // e.g. for GitHub Pages:
+  // window.KNIFE_URL = 'https://<username>.github.io/<repo>/karambit_prime_valorant.glb';
 </script>
 
 <script>
@@ -284,7 +287,6 @@
   };
   firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
-  // Ensure the session persists between rounds
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(console.error);
   const db = firebase.firestore();
 
@@ -337,8 +339,8 @@
   const xpTime = document.getElementById('xpTime');
 
   /* ========= State ========= */
-  let user = null;                  // Firebase user
-  let playerDoc = null;             // players/{uid} data cache
+  let user = null;
+  let playerDoc = null;
   let equipped = { body:null, trail:null, knife:null };
   let currentMode = 'classic';
 
@@ -360,14 +362,13 @@
   const COINS_PER_POINT = 1;
 
   // Leaderboard view
-  let lbView = 'live'; // 'live' or 'all'
+  let lbView = 'live';
   let lbUnsub = null;
 
   /* ========= Auth & Lobby ========= */
   googleBtn.addEventListener('click', async ()=>{
     const provider = new firebase.auth.GoogleAuthProvider();
-    try{
-      await auth.signInWithPopup(provider);
+    try{ await auth.signInWithPopup(provider);
     }catch(e){ console.error(e); alert('Sign-in failed: ' + e.message); }
   });
 
@@ -380,7 +381,6 @@
       return;
     }
     googleBtn.style.display = 'none';
-    // Ensure player doc
     const ref = db.collection('players').doc(user.uid);
     const snap = await ref.get();
     if (!snap.exists){
@@ -400,7 +400,6 @@
     coinsBadge.style.display = 'inline-flex';
     lobbyOverlay.style.display = 'grid';
 
-    // start leaderboard in lobby
     setLeaderboardView(lbView);
   });
 
@@ -418,8 +417,6 @@
     }catch(e){ console.error(e); }
 
     await primeRankSnapshotAndHUD();
-
-    // start game
     startGame();
   });
 
@@ -456,8 +453,9 @@
       equipped = playerDoc.equipped || equipped;
       coinsText.textContent = playerDoc.coins || 0;
       shopCoinsText.textContent = playerDoc.coins || 0;
-      setCarColor(rankColor(playerDoc.rankIndex||0));
-      updateKnifeTint(color);
+      const col = rankColor(playerDoc.rankIndex||0);
+      setCarColor(col);
+      applyKnifeTint(col);
     }
   }
 
@@ -483,17 +481,14 @@
       ];
     }
 
-    // Filter
     if (filterType !== 'all') items = items.filter(it=> (it.type===filterType));
 
-    // Load inventory ownership
     const inv = new Set();
     if (user){
       const invSnap = await db.collection('players').doc(user.uid).collection('inventory').get();
       invSnap.forEach(d=> inv.add(d.id));
     }
 
-    // Render
     for (const it of items){
       const card = document.createElement('div'); card.className = 'shopCard';
       const top = document.createElement('div'); top.className='shopTop';
@@ -529,7 +524,7 @@
         const invRef = pRef.collection('inventory').doc(item.id);
         const [pSnap, invSnap] = await Promise.all([tx.get(pRef), tx.get(invRef)]);
         const pdata = pSnap.data() || {};
-        if (invSnap.exists) return; // already owned
+        if (invSnap.exists) return;
         const coins = pdata.coins || 0;
         const price = item.price || 0;
         if (coins < price) throw new Error('Not enough coins');
@@ -537,7 +532,7 @@
         tx.set(invRef, { owned:true, acquiredAt: firebase.firestore.FieldValue.serverTimestamp(), item:{name:item.name, type:item.type} });
       });
       await refreshPlayer();
-      await refreshShop(); // re-render
+      await refreshShop();
     }catch(e){ alert(e.message); }
   }
 
@@ -552,7 +547,6 @@
       playerDoc.equipped = { ...(playerDoc.equipped||{}), [key]: item.id };
       equipped = playerDoc.equipped;
       if (item.type==='body' && item.color){
-        // immediately tint car
         setBodyPaintColor(item.color);
       }
       alert('Equipped!');
@@ -700,10 +694,10 @@
       case 'Silver': return '#b9c3cf';
       case 'Gold': return '#e7c14c';
       case 'Platinum': return '#3dd4c6';
-      case 'Diamond': return '#a24bff'; // purple
+      case 'Diamond': return '#a24bff';
       case 'Ascendant': return '#4bd37d';
-      case 'Immortal': return '#ff4b4b'; // red
-      case 'Radiant': return '#ffcc33'; // richer gold
+      case 'Immortal': return '#ff4b4b';
+      case 'Radiant': return '#ffcc33';
       default: return '#999';
     }
   }
@@ -898,6 +892,8 @@
       const mats = c.mesh.userData && c.mesh.userData.colorMats;
       if (mats){ mats.forEach(m=>m.color.set(color)); }
     }
+    // keep knife glow matched to rank color
+    applyKnifeTint(color);
   }
   function setBodyPaintColor(hex){
     for (const c of cars){
@@ -1041,7 +1037,6 @@
   window.addEventListener('keydown', e=> keys[e.key.toLowerCase()] = true);
   window.addEventListener('keyup',   e=> keys[e.key.toLowerCase()] = false);
 
-  // Guard so game touch handlers don't swallow UI clicks/taps
   function isUIEventTarget(el){
     return !!(el && el.closest(
       'button, input, select, textarea, a,' +
@@ -1093,131 +1088,109 @@
     if (car.boost.active && t > car.boost.timer) car.boost.active = false;
   }
 
- /* ========= FIRST-PERSON KNIFE (GLB model) ========= */
-const knife = {
-  group: null,
-  basePos: new THREE.Vector3(0.7, -0.55, -1.1),
-  baseRot: new THREE.Euler(-0.15, 0.55, 0.25),
-  spin: false,
-  spinStart: 0,
-  spinDur: 1200
-};
-
-// Model cache so we only load once
-let _knifeGLTF = null;
-const KNIFE_URL = (window.KNIFE_URL || './karambit_prime_valorant.glb');
-
-function applyKnifeTint(hex){
-  if (!knife.group) return;
-  const c = new THREE.Color(hex || 0x00e5ff);
-  knife.group.traverse(o=>{
-    if (!o.isMesh || !o.material) return;
-    const m = o.material;
-    // Try to light the blade with emissive; fall back to color
-    if ('emissive' in m){
-      m.emissive = m.emissive || new THREE.Color(0x000000);
-      m.emissive.set(c);
-      if ('emissiveIntensity' in m) m.emissiveIntensity = Math.max(0.5, m.emissiveIntensity || 0.8);
-      if ('metalness' in m) m.metalness = Math.min(1.0, (m.metalness ?? 0.6) + 0.1);
-      if ('roughness' in m) m.roughness = Math.max(0.15, (m.roughness ?? 0.3) * 0.9);
-    } else if ('color' in m){
-      m.color.set(c);
-    }
-    m.needsUpdate = true;
-  });
-}
-
-function addKnifeToCamera(){
-  if (knife.group){
-    knife.group.removeFromParent();
-    knife.group = null;
-  }
-
-  const loader = new THREE.GLTFLoader();
-
-  // If your GLB happens to be Draco-compressed, the lines below handle it.
-  // (Harmless if not compressed.)
-  const draco = new THREE.DRACOLoader();
-  draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
-  loader.setDRACOLoader(draco);
-
-  const useModel = (gltf)=>{
-    // Clone to avoid mutating cached scene on re-use
-    const m = gltf.scene.clone(true);
-    m.traverse(o=>{
-      if (o.isMesh){
-        o.castShadow = true;
-        o.receiveShadow = true;
-        o.frustumCulled = false;
-      }
-    });
-
-    // Tweak scale/orientation if needed (these values look good for most karambit GLBs)
-    m.scale.set(0.95, 0.95, 0.95);
-    // If it faces the wrong way, nudge yaw here:
-    // m.rotation.y += Math.PI;
-
-    camera.add(m);
-    knife.group = m;
-    knife.group.position.copy(knife.basePos);
-    knife.group.rotation.copy(knife.baseRot);
-    applyKnifeTint(currentRankColor);
-
-    scene.add(camera);
+  /* ========= FIRST-PERSON KNIFE (GLB model) ========= */
+  const knife = {
+    group: null,
+    basePos: new THREE.Vector3(0.7, -0.55, -1.1),
+    baseRot: new THREE.Euler(-0.15, 0.55, 0.25),
+    spin: false,
+    spinStart: 0,
+    spinDur: 1200
   };
+  let _knifeGLTF = null;
+  const KNIFE_URL = (window.KNIFE_URL || './karambit_prime_valorant.glb');
 
-  if (_knifeGLTF){
-    useModel(_knifeGLTF);
-    return;
+  function applyKnifeTint(hex){
+    if (!knife.group) return;
+    const c = new THREE.Color(hex || 0x00e5ff);
+    knife.group.traverse(o=>{
+      if (!o.isMesh || !o.material) return;
+      const m = o.material;
+      if ('emissive' in m){
+        m.emissive = m.emissive || new THREE.Color(0x000000);
+        m.emissive.set(c);
+        if ('emissiveIntensity' in m) m.emissiveIntensity = Math.max(0.5, m.emissiveIntensity || 0.8);
+        if ('metalness' in m) m.metalness = Math.min(1.0, (m.metalness ?? 0.6) + 0.1);
+        if ('roughness' in m) m.roughness = Math.max(0.15, (m.roughness ?? 0.3) * 0.9);
+      } else if ('color' in m){
+        m.color.set(c);
+      }
+      m.needsUpdate = true;
+    });
   }
 
-  loader.load(
-    KNIFE_URL,
-    (gltf)=>{ _knifeGLTF = gltf; useModel(gltf); },
-    undefined,
-    (err)=>{ console.error('Knife model load failed:', err); }
-  );
-}
+  function addKnifeToCamera(){
+    if (knife.group){
+      knife.group.removeFromParent();
+      knife.group = null;
+    }
 
-// Keep the same “inspect spin” on F
-function startSpin(){
-  if (!knife.group || knife.spin) return;
-  knife.spin = true;
-  knife.spinStart = performance.now();
-}
-window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase() === 'f') startSpin(); });
+    const loader = new THREE.GLTFLoader();
+    const draco = new THREE.DRACOLoader();
+    draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+    loader.setDRACOLoader(draco);
 
-// Idle bob + inspect spin (called from animate())
-function updateKnife(){
-  if (!knife.group) return;
-  const now = performance.now();
-  const t = now * 0.001;
+    const useModel = (gltf)=>{
+      const m = gltf.scene.clone(true);
+      m.traverse(o=>{
+        if (o.isMesh){
+          o.castShadow = true;
+          o.receiveShadow = true;
+          o.frustumCulled = false;
+        }
+      });
+      m.scale.set(0.95, 0.95, 0.95);
+      camera.add(m);
+      knife.group = m;
+      knife.group.position.copy(knife.basePos);
+      knife.group.rotation.copy(knife.baseRot);
+      applyKnifeTint(currentRankColor);
+      scene.add(camera);
+    };
 
-  // Idle sway
-  const swayX = Math.sin(t * 2.0) * 0.01;
-  const swayY = Math.cos(t * 1.7) * 0.008;
+    if (_knifeGLTF){ useModel(_knifeGLTF); return; }
 
-  knife.group.position.set(
-    knife.basePos.x + swayX,
-    knife.basePos.y + swayY - (cars[0]?.boost?.active ? 0.04 : 0),
-    knife.basePos.z
-  );
-  knife.group.rotation.set(
-    knife.baseRot.x + swayY*0.6,
-    knife.baseRot.y,
-    knife.baseRot.z + swayX*0.8
-  );
-
-  // Inspect spin
-  if (knife.spin){
-    const p = Math.min(1, (now - knife.spinStart) / knife.spinDur);
-    const ease = p<0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
-    knife.group.rotation.y = knife.baseRot.y + ease * Math.PI * 2;
-    knife.group.rotation.z = knife.baseRot.z + Math.sin(ease*Math.PI)*0.25;
-    if (p >= 1){ knife.spin = false; knife.group.rotation.copy(knife.baseRot); }
+    loader.load(
+      KNIFE_URL,
+      (gltf)=>{ _knifeGLTF = gltf; useModel(gltf); },
+      undefined,
+      (err)=>{ console.error('Knife model load failed:', err); }
+    );
   }
-}
 
+  function startSpin(){
+    if (!knife.group || knife.spin) return;
+    knife.spin = true;
+    knife.spinStart = performance.now();
+  }
+  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase() === 'f') startSpin(); });
+
+  function updateKnife(){
+    if (!knife.group) return;
+    const now = performance.now();
+    const t = now * 0.001;
+    const swayX = Math.sin(t * 2.0) * 0.01;
+    const swayY = Math.cos(t * 1.7) * 0.008;
+
+    knife.group.position.set(
+      knife.basePos.x + swayX,
+      knife.basePos.y + swayY - (cars[0]?.boost?.active ? 0.04 : 0),
+      knife.basePos.z
+    );
+    knife.group.rotation.set(
+      knife.baseRot.x + swayY*0.6,
+      knife.baseRot.y,
+      knife.baseRot.z + swayX*0.8
+    );
+
+    if (knife.spin){
+      const p = Math.min(1, (now - knife.spinStart) / knife.spinDur);
+      const ease = p<0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
+      knife.group.rotation.y = knife.baseRot.y + ease * Math.PI * 2;
+      knife.group.rotation.z = knife.baseRot.z + Math.sin(ease*Math.PI)*0.25;
+      if (p >= 1){ knife.spin = false; knife.group.rotation.copy(knife.baseRot); }
+    }
+  }
 
   /* ========= Helpers: spawn position & grace ========= */
   function setStartPosition(){
@@ -1238,6 +1211,8 @@ function updateKnife(){
   /* ========= Loop ========= */
   let lastTime = performance.now();
   const sessionStart = performance.now();
+  let loopStarted = false;
+  function ensureLoop(){ if (!loopStarted){ loopStarted = true; animate(); } }
 
   function fmtTime(ms){
     const total = Math.floor(ms/1000);
@@ -1432,7 +1407,6 @@ function updateKnife(){
     if (idx === 0 && rr < 0) rr = 0;
     if (idx === RADIANT_INDEX && rr > 100) rr = 100;
 
-    // coins
     const coinsEarned = scoreVal * COINS_PER_POINT;
     await ref.set({
       rankIndex: idx, rr, coins: (data.coins||0) + coinsEarned,
@@ -1498,7 +1472,7 @@ function updateKnife(){
     lobbyOverlay.style.display = 'none';
     alive = true;
     addKnifeToCamera();
-    animate();
+    ensureLoop();
   }
 
   async function doGameOver(){
@@ -1542,14 +1516,13 @@ function updateKnife(){
     finalScoreEl.textContent = score;
     restartOverlay.style.display = 'grid';
 
-    // refresh coin badges
     refreshPlayer().catch(()=>{});
   }
 
   /* ========= Kickoff ========= */
   startChatListener();
   setLeaderboardView('live');
-  animate();
+  ensureLoop();
 
   window.addEventListener('resize', ()=>{
     camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
@@ -1559,5 +1532,3 @@ function updateKnife(){
 </script>
 </body>
 </html>
-
-
