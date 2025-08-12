@@ -155,6 +155,10 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
 
 <!-- Three.js -->
+  <!-- GLTF + DRACO loaders (global THREE.* style for non-module builds) -->
+<script src="https://unpkg.com/three@0.154.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.154.0/examples/js/loaders/DRACOLoader.js"></script>
+
 <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
 </head>
 <body>
@@ -450,6 +454,7 @@
       coinsText.textContent = playerDoc.coins || 0;
       shopCoinsText.textContent = playerDoc.coins || 0;
       setCarColor(rankColor(playerDoc.rankIndex||0));
+      updateKnifeTint(color);
     }
   }
 
@@ -1085,61 +1090,131 @@
     if (car.boost.active && t > car.boost.timer) car.boost.active = false;
   }
 
-  /* ---------- FIRST-PERSON KNIFE ---------- */
-  const knife = {
-    group:null, basePos:new THREE.Vector3(0.7,-0.55,-1.1), baseRot:new THREE.Euler(-0.15, 0.55, 0.25),
-    spin:false, spinStart:0, spinDur:1200
-  };
-  function neonBladeMaterial(){
-    return new THREE.MeshStandardMaterial({
-      color:0x00eaff, metalness:0.9, roughness:0.2,
-      emissive:0x0088ff, emissiveIntensity:0.8
-    });
-  }
-  function handleMaterial(){
-    return new THREE.MeshStandardMaterial({color:0x222222, metalness:0.4, roughness:0.7});
+ /* ========= FIRST-PERSON KNIFE (GLB model) ========= */
+const knife = {
+  group: null,
+  basePos: new THREE.Vector3(0.7, -0.55, -1.1),
+  baseRot: new THREE.Euler(-0.15, 0.55, 0.25),
+  spin: false,
+  spinStart: 0,
+  spinDur: 1200
+};
+
+// Model cache so we only load once
+let _knifeGLTF = null;
+const KNIFE_URL = (window.KNIFE_URL || './karambit_prime_valorant.glb');
+
+function applyKnifeTint(hex){
+  if (!knife.group) return;
+  const c = new THREE.Color(hex || 0x00e5ff);
+  knife.group.traverse(o=>{
+    if (!o.isMesh || !o.material) return;
+    const m = o.material;
+    // Try to light the blade with emissive; fall back to color
+    if ('emissive' in m){
+      m.emissive = m.emissive || new THREE.Color(0x000000);
+      m.emissive.set(c);
+      if ('emissiveIntensity' in m) m.emissiveIntensity = Math.max(0.5, m.emissiveIntensity || 0.8);
+      if ('metalness' in m) m.metalness = Math.min(1.0, (m.metalness ?? 0.6) + 0.1);
+      if ('roughness' in m) m.roughness = Math.max(0.15, (m.roughness ?? 0.3) * 0.9);
+    } else if ('color' in m){
+      m.color.set(c);
+    }
+    m.needsUpdate = true;
+  });
+}
+
+function addKnifeToCamera(){
+  if (knife.group){
+    knife.group.removeFromParent();
+    knife.group = null;
   }
 
-  // Revamped first-person knife
-  function makeNeonDagger(){
-    const g = new THREE.Group();
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 1.1), neonBladeMaterial());
-    blade.position.set(0, 0, 0.45); blade.rotation.x = Math.PI/2; g.add(blade);
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.25, 12), neonBladeMaterial());
-    tip.rotation.x = Math.PI/2; tip.position.set(0, 0, 1.0); g.add(tip);
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.5, 16), handleMaterial());
-    handle.rotation.x = Math.PI/2; handle.position.set(0, 0, -0.25); g.add(handle);
-    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.1), handleMaterial());
-    guard.rotation.x = Math.PI/2; guard.position.set(0, 0, 0); g.add(guard);
-    return g;
-  }
-  function addKnifeToCamera(){
-    if (knife.group){
-      knife.group.removeFromParent();
-      knife.group = null;
-    }
-    knife.group = makeNeonDagger();
-    camera.add(knife.group);
+  const loader = new THREE.GLTFLoader();
+
+  // If your GLB happens to be Draco-compressed, the lines below handle it.
+  // (Harmless if not compressed.)
+  const draco = new THREE.DRACOLoader();
+  draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+  loader.setDRACOLoader(draco);
+
+  const useModel = (gltf)=>{
+    // Clone to avoid mutating cached scene on re-use
+    const m = gltf.scene.clone(true);
+    m.traverse(o=>{
+      if (o.isMesh){
+        o.castShadow = true;
+        o.receiveShadow = true;
+        o.frustumCulled = false;
+      }
+    });
+
+    // Tweak scale/orientation if needed (these values look good for most karambit GLBs)
+    m.scale.set(0.95, 0.95, 0.95);
+    // If it faces the wrong way, nudge yaw here:
+    // m.rotation.y += Math.PI;
+
+    camera.add(m);
+    knife.group = m;
     knife.group.position.copy(knife.basePos);
     knife.group.rotation.copy(knife.baseRot);
+    applyKnifeTint(currentRankColor);
+
     scene.add(camera);
+  };
+
+  if (_knifeGLTF){
+    useModel(_knifeGLTF);
+    return;
   }
-  function startSpin(){ if (!knife.group || knife.spin) return; knife.spin = true; knife.spinStart = performance.now(); }
-  window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase() === 'f') startSpin(); });
-  function updateKnife(){
-    if (!knife.group) return;
-    const t = performance.now() * 0.001;
-    knife.group.position.y = knife.basePos.y + Math.sin(t*2.2)*0.01;
-    knife.group.rotation.x = knife.baseRot.x + Math.sin(t*1.6)*0.01;
-    if (knife.spin){
-      const now = performance.now();
-      const p = Math.min(1, (now - knife.spinStart) / knife.spinDur);
-      const ease = p<0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
-      knife.group.rotation.y = knife.baseRot.y + ease * Math.PI * 2;
-      knife.group.rotation.z = knife.baseRot.z + Math.sin(ease*Math.PI)*0.25;
-      if (p >= 1){ knife.spin = false; knife.group.rotation.copy(knife.baseRot); }
-    }
+
+  loader.load(
+    KNIFE_URL,
+    (gltf)=>{ _knifeGLTF = gltf; useModel(gltf); },
+    undefined,
+    (err)=>{ console.error('Knife model load failed:', err); }
+  );
+}
+
+// Keep the same “inspect spin” on F
+function startSpin(){
+  if (!knife.group || knife.spin) return;
+  knife.spin = true;
+  knife.spinStart = performance.now();
+}
+window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase() === 'f') startSpin(); });
+
+// Idle bob + inspect spin (called from animate())
+function updateKnife(){
+  if (!knife.group) return;
+  const now = performance.now();
+  const t = now * 0.001;
+
+  // Idle sway
+  const swayX = Math.sin(t * 2.0) * 0.01;
+  const swayY = Math.cos(t * 1.7) * 0.008;
+
+  knife.group.position.set(
+    knife.basePos.x + swayX,
+    knife.basePos.y + swayY - (cars[0]?.boost?.active ? 0.04 : 0),
+    knife.basePos.z
+  );
+  knife.group.rotation.set(
+    knife.baseRot.x + swayY*0.6,
+    knife.baseRot.y,
+    knife.baseRot.z + swayX*0.8
+  );
+
+  // Inspect spin
+  if (knife.spin){
+    const p = Math.min(1, (now - knife.spinStart) / knife.spinDur);
+    const ease = p<0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
+    knife.group.rotation.y = knife.baseRot.y + ease * Math.PI * 2;
+    knife.group.rotation.z = knife.baseRot.z + Math.sin(ease*Math.PI)*0.25;
+    if (p >= 1){ knife.spin = false; knife.group.rotation.copy(knife.baseRot); }
   }
+}
+
 
   /* ========= Helpers: spawn position & grace ========= */
   function setStartPosition(){
@@ -1481,3 +1556,4 @@
 </script>
 </body>
 </html>
+
