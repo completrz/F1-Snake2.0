@@ -154,11 +154,12 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
 
-<!-- Three.js core (must be FIRST) -->
+<!-- Three.js core FIRST -->
 <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
-<!-- Examples loaders (need THREE to exist) -->
+<!-- Loaders AFTER core -->
 <script src="https://unpkg.com/three@0.154.0/examples/js/loaders/DRACOLoader.js"></script>
 <script src="https://unpkg.com/three@0.154.0/examples/js/loaders/GLTFLoader.js"></script>
+
 </head>
 <body>
 
@@ -267,11 +268,9 @@
   </div>
 </div>
 
-<!-- Set model path: keep as relative file in same folder, or replace with your GitHub Pages URL -->
+<!-- Tell the app to load the local GLB -->
 <script>
   window.KNIFE_URL = './karambit_prime_valorant.glb';
-  // e.g. for GitHub Pages:
-  // window.KNIFE_URL = 'https://<username>.github.io/<repo>/karambit_prime_valorant.glb';
 </script>
 
 <script>
@@ -287,6 +286,7 @@
   };
   firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
+  // Ensure the session persists between rounds
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(console.error);
   const db = firebase.firestore();
 
@@ -339,8 +339,8 @@
   const xpTime = document.getElementById('xpTime');
 
   /* ========= State ========= */
-  let user = null;
-  let playerDoc = null;
+  let user = null;                  // Firebase user
+  let playerDoc = null;             // players/{uid} data cache
   let equipped = { body:null, trail:null, knife:null };
   let currentMode = 'classic';
 
@@ -362,13 +362,14 @@
   const COINS_PER_POINT = 1;
 
   // Leaderboard view
-  let lbView = 'live';
+  let lbView = 'live'; // 'live' or 'all'
   let lbUnsub = null;
 
   /* ========= Auth & Lobby ========= */
   googleBtn.addEventListener('click', async ()=>{
     const provider = new firebase.auth.GoogleAuthProvider();
-    try{ await auth.signInWithPopup(provider);
+    try{
+      await auth.signInWithPopup(provider);
     }catch(e){ console.error(e); alert('Sign-in failed: ' + e.message); }
   });
 
@@ -381,6 +382,7 @@
       return;
     }
     googleBtn.style.display = 'none';
+    // Ensure player doc
     const ref = db.collection('players').doc(user.uid);
     const snap = await ref.get();
     if (!snap.exists){
@@ -400,6 +402,7 @@
     coinsBadge.style.display = 'inline-flex';
     lobbyOverlay.style.display = 'grid';
 
+    // start leaderboard in lobby
     setLeaderboardView(lbView);
   });
 
@@ -417,6 +420,8 @@
     }catch(e){ console.error(e); }
 
     await primeRankSnapshotAndHUD();
+
+    // start game
     startGame();
   });
 
@@ -453,9 +458,9 @@
       equipped = playerDoc.equipped || equipped;
       coinsText.textContent = playerDoc.coins || 0;
       shopCoinsText.textContent = playerDoc.coins || 0;
-      const col = rankColor(playerDoc.rankIndex||0);
-      setCarColor(col);
-      applyKnifeTint(col);
+      setCarColor(rankColor(playerDoc.rankIndex||0));
+      // FIX: apply current tint to knife
+      applyKnifeTint(currentRankColor);
     }
   }
 
@@ -481,14 +486,17 @@
       ];
     }
 
+    // Filter
     if (filterType !== 'all') items = items.filter(it=> (it.type===filterType));
 
+    // Load inventory ownership
     const inv = new Set();
     if (user){
       const invSnap = await db.collection('players').doc(user.uid).collection('inventory').get();
       invSnap.forEach(d=> inv.add(d.id));
     }
 
+    // Render
     for (const it of items){
       const card = document.createElement('div'); card.className = 'shopCard';
       const top = document.createElement('div'); top.className='shopTop';
@@ -524,7 +532,7 @@
         const invRef = pRef.collection('inventory').doc(item.id);
         const [pSnap, invSnap] = await Promise.all([tx.get(pRef), tx.get(invRef)]);
         const pdata = pSnap.data() || {};
-        if (invSnap.exists) return;
+        if (invSnap.exists) return; // already owned
         const coins = pdata.coins || 0;
         const price = item.price || 0;
         if (coins < price) throw new Error('Not enough coins');
@@ -532,7 +540,7 @@
         tx.set(invRef, { owned:true, acquiredAt: firebase.firestore.FieldValue.serverTimestamp(), item:{name:item.name, type:item.type} });
       });
       await refreshPlayer();
-      await refreshShop();
+      await refreshShop(); // re-render
     }catch(e){ alert(e.message); }
   }
 
@@ -547,6 +555,7 @@
       playerDoc.equipped = { ...(playerDoc.equipped||{}), [key]: item.id };
       equipped = playerDoc.equipped;
       if (item.type==='body' && item.color){
+        // immediately tint car
         setBodyPaintColor(item.color);
       }
       alert('Equipped!');
@@ -892,8 +901,6 @@
       const mats = c.mesh.userData && c.mesh.userData.colorMats;
       if (mats){ mats.forEach(m=>m.color.set(color)); }
     }
-    // keep knife glow matched to rank color
-    applyKnifeTint(color);
   }
   function setBodyPaintColor(hex){
     for (const c of cars){
@@ -1037,6 +1044,7 @@
   window.addEventListener('keydown', e=> keys[e.key.toLowerCase()] = true);
   window.addEventListener('keyup',   e=> keys[e.key.toLowerCase()] = false);
 
+  // Guard so game touch handlers don't swallow UI clicks/taps
   function isUIEventTarget(el){
     return !!(el && el.closest(
       'button, input, select, textarea, a,' +
@@ -1097,6 +1105,8 @@
     spinStart: 0,
     spinDur: 1200
   };
+
+  // Model cache so we only load once
   let _knifeGLTF = null;
   const KNIFE_URL = (window.KNIFE_URL || './karambit_prime_valorant.glb');
 
@@ -1126,11 +1136,14 @@
     }
 
     const loader = new THREE.GLTFLoader();
+
+    // If your GLB is Draco-compressed, this will decode it (harmless if not).
     const draco = new THREE.DRACOLoader();
     draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
     loader.setDRACOLoader(draco);
 
     const useModel = (gltf)=>{
+      // Clone to avoid mutating cached scene
       const m = gltf.scene.clone(true);
       m.traverse(o=>{
         if (o.isMesh){
@@ -1139,16 +1152,24 @@
           o.frustumCulled = false;
         }
       });
+
+      // Adjust size/orientation if needed
       m.scale.set(0.95, 0.95, 0.95);
+      // m.rotation.y += Math.PI; // uncomment if facing wrong way
+
       camera.add(m);
       knife.group = m;
       knife.group.position.copy(knife.basePos);
       knife.group.rotation.copy(knife.baseRot);
       applyKnifeTint(currentRankColor);
+
       scene.add(camera);
     };
 
-    if (_knifeGLTF){ useModel(_knifeGLTF); return; }
+    if (_knifeGLTF){
+      useModel(_knifeGLTF);
+      return;
+    }
 
     loader.load(
       KNIFE_URL,
@@ -1158,6 +1179,7 @@
     );
   }
 
+  // Keep the same “inspect spin” on F
   function startSpin(){
     if (!knife.group || knife.spin) return;
     knife.spin = true;
@@ -1165,10 +1187,13 @@
   }
   window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase() === 'f') startSpin(); });
 
+  // Idle bob + inspect spin (called from animate())
   function updateKnife(){
     if (!knife.group) return;
     const now = performance.now();
     const t = now * 0.001;
+
+    // Idle sway
     const swayX = Math.sin(t * 2.0) * 0.01;
     const swayY = Math.cos(t * 1.7) * 0.008;
 
@@ -1183,6 +1208,7 @@
       knife.baseRot.z + swayX*0.8
     );
 
+    // Inspect spin
     if (knife.spin){
       const p = Math.min(1, (now - knife.spinStart) / knife.spinDur);
       const ease = p<0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
@@ -1211,8 +1237,6 @@
   /* ========= Loop ========= */
   let lastTime = performance.now();
   const sessionStart = performance.now();
-  let loopStarted = false;
-  function ensureLoop(){ if (!loopStarted){ loopStarted = true; animate(); } }
 
   function fmtTime(ms){
     const total = Math.floor(ms/1000);
@@ -1407,6 +1431,7 @@
     if (idx === 0 && rr < 0) rr = 0;
     if (idx === RADIANT_INDEX && rr > 100) rr = 100;
 
+    // coins
     const coinsEarned = scoreVal * COINS_PER_POINT;
     await ref.set({
       rankIndex: idx, rr, coins: (data.coins||0) + coinsEarned,
@@ -1472,7 +1497,7 @@
     lobbyOverlay.style.display = 'none';
     alive = true;
     addKnifeToCamera();
-    ensureLoop();
+    animate();
   }
 
   async function doGameOver(){
@@ -1482,7 +1507,7 @@
 
     const elapsed = performance.now() - gameStartMs;
     const prevIdx = prevRankIndex;
-    const prevRRLocal = prevRR;
+    const prevRRElLocal = prevRR;
 
     let result = null;
     try{
@@ -1491,17 +1516,17 @@
     }catch(e){ console.error('Rank/leaderboard update failed', e); }
 
     const newIdx = result ? result.rankIndex : prevIdx;
-    const newRR = result ? result.rr : prevRRLocal;
+    const newRR = result ? result.rr : prevRRElLocal;
     setHudRank(newIdx, newRR);
 
-    const deltaTotal = totalRR(newIdx, newRR) - totalRR(prevIdx, prevRRLocal);
+    const deltaTotal = totalRR(newIdx, newRR) - totalRR(prevIdx, prevRRElLocal);
     const sign = deltaTotal >= 0 ? '+' : '';
     rrDeltaEl.textContent = `(${sign}${deltaTotal} RR)`;
     rrDeltaEl.className = '';
     rrDeltaEl.classList.add(deltaTotal >= 0 ? 'good' : 'bad');
 
     prevRankEl.textContent = RANKS[prevIdx] || 'Unrated';
-    prevRREl.textContent = `RR ${prevRRLocal}`;
+    prevRREl.textContent = `RR ${prevRRElLocal}`;
     nowRankEl.textContent = RANKS[newIdx] || 'Unrated';
     nowRREl.textContent = `RR ${newRR}`;
     promoNoteEl.textContent = '';
@@ -1516,13 +1541,14 @@
     finalScoreEl.textContent = score;
     restartOverlay.style.display = 'grid';
 
+    // refresh coin badges
     refreshPlayer().catch(()=>{});
   }
 
   /* ========= Kickoff ========= */
   startChatListener();
   setLeaderboardView('live');
-  ensureLoop();
+  animate();
 
   window.addEventListener('resize', ()=>{
     camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
