@@ -82,18 +82,13 @@
   #lbList li .name{ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width:0; }
   #lbList li .score{ font-weight: 700; color: #b7f; }
 
-  /* Overlays (start/restart) */
+  /* Overlays */
   .overlay { position: fixed; inset: 0; display: none; place-items: center; z-index: 50;
     background: radial-gradient(60% 60% at 50% 50%, rgba(0,229,255,0.08), rgba(0,0,0,0.55)); animation: fadeIn .25s ease-out both; }
   @keyframes fadeIn { from{opacity:0} to{opacity:1} }
-  .panel {
-    width: min(680px, 92vw);
-    background: rgba(10,14,20,.85);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 16px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-    padding: 22px; text-align: center; backdrop-filter: blur(10px);
-  }
+  .panel { width: min(680px, 92vw); background: rgba(10,14,20,.85);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    padding: 22px; text-align: center; backdrop-filter: blur(10px); }
   .title { font-weight: 800; font-size: 28px; letter-spacing:.3px; margin: 4px 0 6px; }
   .subtitle { opacity:.85; font-size: 14px; margin-bottom: 14px; }
   .inputRow { display:flex; gap:10px; justify-content:center; margin-top: 8px; flex-wrap:wrap;}
@@ -115,21 +110,14 @@
     border: 1px solid rgba(255,255,255,0.14); padding: 22px 26px; border-radius: 16px; box-shadow: 0 30px 80px rgba(0,0,0,0.6); }
   #rankUpBadge{ width:100px; height:100px; filter: drop-shadow(0 0 18px rgba(255,255,255,0.4)); }
   #rankUpText{ font-weight:900; letter-spacing:.4px; }
-  .burst{
-    position:absolute; width:6px; height:6px; border-radius:50%;
-    background:#fff; opacity:.9; pointer-events:none; animation: fly 800ms ease-out forwards;
-  }
+  .burst{ position:absolute; width:6px; height:6px; border-radius:50%; background:#fff; opacity:.9; pointer-events:none; animation: fly 800ms ease-out forwards; }
   @keyframes fly{ to{ transform: translate(var(--dx), var(--dy)) scale(0.2); opacity:0; } }
 
   /* Flashy Radiant glow pulse */
   .radiant-glow { position: absolute; width: 160px; height: 160px; border-radius: 50%;
     background: radial-gradient(circle, rgba(255,204,51,0.95) 0%, rgba(255,204,51,0.18) 55%, transparent 70%);
     pointer-events: none; animation: radiantPulse 1.2s ease-out forwards; filter: blur(8px); z-index: 9999; }
-  @keyframes radiantPulse {
-    0% { transform: scale(0.5); opacity: 1; }
-    40% { transform: scale(1.35); opacity: 1; }
-    100% { transform: scale(2.1); opacity: 0; }
-  }
+  @keyframes radiantPulse { 0% { transform: scale(0.5); opacity: 1; } 40% { transform: scale(1.35); opacity: 1; } 100% { transform: scale(2.1); opacity: 0; } }
 
   /* Shop */
   #shopOverlay .shopGrid{ display:grid; grid-template-columns: repeat(2, minmax(130px,1fr)); gap:10px; max-height:340px; overflow:auto; }
@@ -154,11 +142,10 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
 
-<!-- Three.js (must be BEFORE loaders) -->
-<script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
-<!-- GLTF + DRACO loaders (global THREE.* style for non-module builds) -->
-<script src="https://unpkg.com/three@0.154.0/examples/js/loaders/DRACOLoader.js"></script>
-<script src="https://unpkg.com/three@0.154.0/examples/js/loaders/GLTFLoader.js"></script>
+<!-- Three + legacy loaders (correct order & version) -->
+<script src="https://unpkg.com/three@0.151.3/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.151.3/examples/js/loaders/DRACOLoader.js"></script>
+<script src="https://unpkg.com/three@0.151.3/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 
@@ -267,9 +254,9 @@
   </div>
 </div>
 
-<!-- Absolute URL for your GLB (works on GitHub Pages) -->
+<!-- Point KNIFE_URL to the file next to index.html -->
 <script>
-  window.KNIFE_URL = 'https://completrz.github.io/F1-Snake2.0/karambit_prime_valorant.glb';
+  window.KNIFE_URL = 'karambit_prime_valorant.glb';
 </script>
 
 <script>
@@ -385,15 +372,13 @@
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       playerDoc = { name: defaultName, coins: 0, rankIndex:0, rr:0, highScore:0, equipped:{body:null,trail:null,knife:null}};
-    } else {
-      playerDoc = snap.data();
-    }
+    } else { playerDoc = snap.data(); }
+
     equipped = playerDoc.equipped || {body:null, trail:null, knife:null};
     usernameInput.value = playerDoc.name || '';
     coinsText.textContent = playerDoc.coins || 0;
     coinsBadge.style.display = 'inline-flex';
     lobbyOverlay.style.display = 'grid';
-
     setLeaderboardView(lbView);
   });
 
@@ -445,11 +430,11 @@
     if (snap.exists){
       playerDoc = snap.data();
       equipped = playerDoc.equipped || equipped;
+      const tint = rankColor(playerDoc.rankIndex||0);
       coinsText.textContent = playerDoc.coins || 0;
       shopCoinsText.textContent = playerDoc.coins || 0;
-      setCarColor(rankColor(playerDoc.rankIndex||0));
-      // NEW: tint knife to current rank color (if loaded)
-      applyKnifeTint(rankColor(playerDoc.rankIndex||0));
+      setCarColor(tint);
+      applyKnifeTint(tint);
     }
   }
 
@@ -559,10 +544,7 @@
       const items = [];
       snap.forEach(doc=>{
         const d = doc.data() || {};
-        items.push({
-          uid: doc.id, name: d.name || 'Player',
-          score: d[col] || 0, rankIndex: (typeof d.rankIndex==='number')? d.rankIndex : 0
-        });
+        items.push({ uid: doc.id, name: d.name || 'Player', score: d[col] || 0, rankIndex: (typeof d.rankIndex==='number')? d.rankIndex : 0 });
       });
       renderLeaderboard(items);
     });
@@ -626,37 +608,6 @@
     }catch(e){ console.error(e); }
   }
 
-  /* ========= Chat (last 50) ========= */
-  const CHAT_MAX = 50;
-  function startChatListener(){
-    db.collection('chat').orderBy('timestamp','desc').limit(CHAT_MAX).onSnapshot(snap=>{
-      const arr = []; snap.forEach(d=>arr.push(d.data())); arr.reverse();
-      chatMessagesEl.innerHTML = '';
-      arr.forEach(m=>{
-        const time = m.timestamp ? new Date(m.timestamp.seconds*1000).toLocaleTimeString() : '';
-        const div = document.createElement('div');
-        div.textContent = `[${time}] ${m.name||'Player'}: ${m.message||''}`;
-        chatMessagesEl.appendChild(div);
-      });
-      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-    });
-  }
-  async function sendMessage(text){
-    const t = (text||'').trim(); if (!t) return;
-    await db.collection('chat').add({
-      name: playerDoc?.name || 'Player',
-      message: t, timestamp: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    const all = await db.collection('chat').orderBy('timestamp','asc').get();
-    if (all.size > CHAT_MAX){
-      const toDelete = all.docs.slice(0, all.size-CHAT_MAX);
-      const batch = db.batch(); toDelete.forEach(doc=>batch.delete(doc.ref)); await batch.commit();
-    }
-  }
-  chatInputEl.addEventListener('keydown', e=>{
-    if (e.key === 'Enter'){ e.preventDefault(); sendMessage(chatInputEl.value); chatInputEl.value=''; }
-  });
-
   /* ========= Ranks ========= */
   const RANKS = [
     'Iron 1','Iron 2','Iron 3',
@@ -675,9 +626,7 @@
     const groups = ['Iron','Bronze','Silver','Gold','Platinum','Diamond','Ascendant','Immortal'];
     return groups[Math.floor(idx/3)] || 'Radiant';
   }
-  function sanitizeId(name){
-    return (name||'player').trim().toLowerCase().replace(/[^a-z0-9_-]/g,'_');
-  }
+  function sanitizeId(name){ return (name||'player').trim().toLowerCase().replace(/[^a-z0-9_-]/g,'_'); }
   function rankColor(idx){
     const g = rankGroup(idx);
     switch(g){
@@ -921,8 +870,7 @@
       new THREE.IcosahedronGeometry(1.0, 0),
       new THREE.MeshStandardMaterial({color:0x00ffae, emissive:0x00ffae, emissiveIntensity:0.6, roughness:0.3, metalness:0.2})
     );
-    core.position.y = 1.0;
-    group.add(core);
+    core.position.y = 1.0; group.add(core);
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.2, 0.06, 12, 40),
       new THREE.MeshBasicMaterial({color:0x66ffd9, transparent:true, opacity:0.6})
@@ -1089,7 +1037,7 @@
   };
 
   let _knifeGLTF = null;
-  const KNIFE_URL = (window.KNIFE_URL || './karambit_prime_valorant.glb');
+  const KNIFE_URL = (window.KNIFE_URL || 'karambit_prime_valorant.glb');
 
   function applyKnifeTint(hex){
     if (!knife.group) return;
@@ -1130,28 +1078,21 @@
           o.frustumCulled = false;
         }
       });
-
       m.scale.set(0.95, 0.95, 0.95);
       camera.add(m);
       knife.group = m;
       knife.group.position.copy(knife.basePos);
       knife.group.rotation.copy(knife.baseRot);
       applyKnifeTint(currentRankColor);
-
       scene.add(camera);
     };
 
-    if (_knifeGLTF){
-      console.log('Reusing cached knife GLTF');
-      useModel(_knifeGLTF);
-      return;
-    }
+    if (_knifeGLTF){ useModel(_knifeGLTF); return; }
 
-    console.log('KNIFE_URL =', KNIFE_URL);
     loader.load(
       KNIFE_URL,
-      (gltf)=>{ console.log('knife loaded'); _knifeGLTF = gltf; useModel(gltf); },
-      (xhr)=>{ console.log('knife progress', (xhr.total ? (xhr.loaded/xhr.total*100).toFixed(0) : '?') + '%'); },
+      (gltf)=>{ _knifeGLTF = gltf; useModel(gltf); },
+      undefined,
       (err)=>{ console.error('Knife model load failed:', err); }
     );
   }
@@ -1404,7 +1345,6 @@
     return { rankIndex: idx, rr, delta, promos, deranks };
   }
 
-  /* ========= Rank-up flashy animation ========= */
   function spawnBursts(centerX, centerY, count=30, colorOverride=null){
     for(let i=0;i<count;i++){
       const b = document.createElement('div');
@@ -1467,7 +1407,7 @@
 
     const elapsed = performance.now() - gameStartMs;
     const prevIdx = prevRankIndex;
-    const prevRRElLocal = prevRR;
+    const prevRRLocal = prevRR;
 
     let result = null;
     try{
@@ -1476,17 +1416,17 @@
     }catch(e){ console.error('Rank/leaderboard update failed', e); }
 
     const newIdx = result ? result.rankIndex : prevIdx;
-    const newRR = result ? result.rr : prevRRElLocal;
+    const newRR = result ? result.rr : prevRRLocal;
     setHudRank(newIdx, newRR);
 
-    const deltaTotal = totalRR(newIdx, newRR) - totalRR(prevIdx, prevRRElLocal);
+    const deltaTotal = totalRR(newIdx, newRR) - totalRR(prevIdx, prevRRLocal);
     const sign = deltaTotal >= 0 ? '+' : '';
     rrDeltaEl.textContent = `(${sign}${deltaTotal} RR)`;
     rrDeltaEl.className = '';
     rrDeltaEl.classList.add(deltaTotal >= 0 ? 'good' : 'bad');
 
     prevRankEl.textContent = RANKS[prevIdx] || 'Unrated';
-    prevRREl.textContent = `RR ${prevRRElLocal}`;
+    prevRREl.textContent = `RR ${prevRRLocal}`;
     nowRankEl.textContent = RANKS[newIdx] || 'Unrated';
     nowRREl.textContent = `RR ${newRR}`;
     promoNoteEl.textContent = '';
@@ -1512,6 +1452,37 @@
   window.addEventListener('resize', ()=>{
     camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+  });
+
+  /* ========= Chat ========= */
+  const CHAT_MAX = 50;
+  function startChatListener(){
+    db.collection('chat').orderBy('timestamp','desc').limit(CHAT_MAX).onSnapshot(snap=>{
+      const arr = []; snap.forEach(d=>arr.push(d.data())); arr.reverse();
+      chatMessagesEl.innerHTML = '';
+      arr.forEach(m=>{
+        const time = m.timestamp ? new Date(m.timestamp.seconds*1000).toLocaleTimeString() : '';
+        const div = document.createElement('div');
+        div.textContent = `[${time}] ${m.name||'Player'}: ${m.message||''}`;
+        chatMessagesEl.appendChild(div);
+      });
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    });
+  }
+  async function sendMessage(text){
+    const t = (text||'').trim(); if (!t) return;
+    await db.collection('chat').add({
+      name: playerDoc?.name || 'Player',
+      message: t, timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    const all = await db.collection('chat').orderBy('timestamp','asc').get();
+    if (all.size > CHAT_MAX){
+      const toDelete = all.docs.slice(0, all.size-CHAT_MAX);
+      const batch = db.batch(); toDelete.forEach(doc=>batch.delete(doc.ref)); await batch.commit();
+    }
+  }
+  chatInputEl.addEventListener('keydown', e=>{
+    if (e.key === 'Enter'){ e.preventDefault(); sendMessage(chatInputEl.value); chatInputEl.value=''; }
   });
 })();
 </script>
