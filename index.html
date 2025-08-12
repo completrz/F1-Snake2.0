@@ -9,7 +9,7 @@
   :root{ --glass: rgba(0,0,0,0.35); --panel: rgba(0,0,0,0.75); --accent:#00e5ff; --good:#3ae374; --bad:#ff4d6d; }
   html, body { margin:0; height:100%; overflow:hidden; background:#87b6ff; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#fff; touch-action:none; }
   canvas{ display:block; }
-  /* HUD / UI styles left as-is (unchanged) */
+  /* HUD / UI styles */
   #hud{ position:absolute; top:14px; left:14px; z-index:30; background:var(--glass); padding:10px 12px; border-radius:12px; backdrop-filter: blur(6px); width:300px; box-shadow:0 6px 18px rgba(0,0,0,0.35);}
   #scoreRow{ font-weight:700; font-size:18px; display:flex; justify-content:space-between; gap:8px; align-items:center;}
   #timer{ font-variant-numeric: tabular-nums; opacity:.95;}
@@ -80,7 +80,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
 
-<!-- Three.js (NON-module) + Example loaders: use r110 so /examples/js/ exists -->
+<!-- Three.js r110 (core first, then loaders) -->
 <script src="https://unpkg.com/three@0.110.0/build/three.min.js"></script>
 <script src="https://unpkg.com/three@0.110.0/examples/js/loaders/DRACOLoader.js"></script>
 <script src="https://unpkg.com/three@0.110.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -170,10 +170,10 @@
   </div>
 </div>
 
-<!-- Where your GLB is (root next to index.html) -->
+<!-- Your GLB is next to index.html -->
 <script>
-  // Your repo: completrz / F1-Snake2.0 → GitHub Pages: https://completrz.github.io/F1-Snake2.0/
-  // File is next to index.html, so a relative URL works both locally and on Pages.
+  // Repo: completrz/F1-Snake2.0 → Pages: https://completrz.github.io/F1-Snake2.0/
+  // Relative URL works locally and on GitHub Pages.
   window.KNIFE_URL = './karambit_prime_valorant.glb';
 </script>
 
@@ -348,7 +348,6 @@
       coinsText.textContent = playerDoc.coins || 0;
       shopCoinsText.textContent = playerDoc.coins || 0;
       setCarColor(rankColor(playerDoc.rankIndex||0));
-      // FIX: previously called updateKnifeTint(color) with undefined var.
       applyKnifeTint(currentRankColor);
     }
   }
@@ -591,6 +590,7 @@
   const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.5, 2000);
   const renderer = new THREE.WebGLRenderer({antialias:true});
   renderer.setSize(innerWidth, innerHeight);
+  renderer.setClearColor(0x87b6ff, 1);  // keep background sky blue even if nothing else renders
   document.body.appendChild(renderer.domElement);
 
   /* Sky */
@@ -626,6 +626,14 @@
   curbOuter.rotation.x = -Math.PI/2; curbOuter.position.y = 0.015; scene.add(curbOuter);
   const curbInner = new THREE.Mesh(new THREE.RingGeometry(trackInner+0.2, trackInner+1.5, 256), curbMatInner);
   curbInner.rotation.x = -Math.PI/2; curbInner.position.y = 0.015; scene.add(curbInner);
+
+  /* Canary cube (debug): you should always see this on the start line */
+  const canary = new THREE.Mesh(
+    new THREE.BoxGeometry(3, 3, 3),
+    new THREE.MeshStandardMaterial({ color: 0xffffff })
+  );
+  canary.position.set(0, 1.6, -ARENA_RADIUS + 10);
+  scene.add(canary);
 
   /* Start grid */
   function makeCheckeredTile(){ const c=document.createElement('canvas'); c.width=c.height=128; const ctx=c.getContext('2d');
@@ -832,12 +840,12 @@
       const m = gltf.scene.clone(true);
       m.traverse(o=>{ if (o.isMesh){ o.castShadow=true; o.receiveShadow=true; o.frustumCulled=false; }});
       m.scale.set(0.95,0.95,0.95);
-      camera.add(m);
+      camera.add(m); // attach to camera
       knife.group = m;
       knife.group.position.copy(knife.basePos);
       knife.group.rotation.copy(knife.baseRot);
       applyKnifeTint(currentRankColor);
-      if (!scene.children.includes(camera)) scene.add(camera);
+      // DO NOT add the camera to the scene here
     };
 
     if (_knifeGLTF){ useModel(_knifeGLTF); return; }
@@ -846,7 +854,18 @@
       KNIFE_URL,
       (gltf)=>{ _knifeGLTF=gltf; useModel(gltf); },
       undefined,
-      (err)=>{ console.error('Knife model load failed:', err); }
+      (err)=>{
+        console.error('Knife model load failed:', err);
+        // fallback placeholder so scene never breaks
+        const ph = new THREE.Mesh(
+          new THREE.BoxGeometry(0.3,0.1,1.0),
+          new THREE.MeshStandardMaterial({color:0xffcc33, emissive:0x222200})
+        );
+        camera.add(ph);
+        ph.position.copy(knife.basePos);
+        ph.rotation.copy(knife.baseRot);
+        knife.group = ph;
+      }
     );
   }
 
@@ -897,8 +916,13 @@
     const now=performance.now(); const dtRaw=(now-lastTime)/1000; const dt=Math.min(dtRaw,0.05); lastTime=now;
     if (alive){ const elapsed = now - gameStartMs; timerEl.textContent = fmtTime(elapsed); }
 
-    const t = (now - sessionStart)/1000;
     const player = cars[0];
+    // Guard against weird NaNs or missing player
+    if (!player || !Number.isFinite(player.position.x) || !Number.isFinite(player.position.z)){
+      setStartPosition();
+    }
+
+    const t = (now - sessionStart)/1000;
 
     if (xpMultActive && now < xpMultUntil){ xpBadge.style.display='flex'; const rem=(xpMultUntil-now)/1000; xpTime.textContent = `${rem.toFixed(1)}s`; }
     else { xpMultActive=false; xpBadge.style.display='none'; }
@@ -939,14 +963,14 @@
       for (const g of xpGems){ g.mesh.position.y = 0.9 + Math.sin(t*2.4 + g.phase)*0.35; g.mesh.rotation.y += 0.03; }
 
       for (let i=pickups.length-1; i>=0; i--){
-        if (pickups[i].mesh.position.distanceTo(player.position) < 3){
+        if (pickups[i].mesh.position.distanceTo(cars[0].position) < 3){
           scene.remove(pickups[i].mesh); pickups.splice(i,1);
           score += xpMultActive ? 2 : 1; scoreEl.textContent = score;
           addFollower(); spawnPickup(); writeLiveScoreThrottled();
         }
       }
       for (let i=xpGems.length-1; i>=0; i--){
-        if (xpGems[i].mesh.position.distanceTo(player.position) < 3.2){
+        if (xpGems[i].mesh.position.distanceTo(cars[0].position) < 3.2){
           scene.remove(xpGems[i].mesh); xpGems.splice(i,1);
           xpMultActive=true; xpMultUntil=now + XP_DURATION_MS;
         }
@@ -963,16 +987,16 @@
       } else { for (const o of obstacles){ o.mesh.position.copy(o.base); } }
 
       if (canDie()){
-        for (const o of obstacles){ if (o.mesh.position.distanceTo(player.position) < 4.0){ doGameOver(); break; } }
-        if (player.position.length() > ARENA_RADIUS-1.5){ doGameOver(); }
+        for (const o of obstacles){ if (o.mesh.position.distanceTo(cars[0].position) < 4.0){ doGameOver(); break; } }
+        if (cars[0].position.length() > ARENA_RADIUS-1.5){ doGameOver(); }
       }
     }
 
     updateKnife();
 
-    const camOffset = new THREE.Vector3(0,15,-30).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
-    camera.position.copy(player.position.clone().add(camOffset));
-    camera.lookAt(player.position);
+    const camOffset = new THREE.Vector3(0,15,-30).applyAxisAngle(new THREE.Vector3(0,1,0), cars[0].rotationY);
+    camera.position.copy(cars[0].position.clone().add(camOffset));
+    camera.lookAt(cars[0].position);
 
     renderer.render(scene, camera);
   }
@@ -1119,7 +1143,7 @@
   /* ========= Kickoff ========= */
   startChatListener();
   setLeaderboardView('live');
-  ensureAnimate(); // start background RAF so lobby has scene
+  ensureAnimate(); // keep scene running in lobby
 
   window.addEventListener('resize', ()=>{
     camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
