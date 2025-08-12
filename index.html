@@ -154,12 +154,11 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
 
-<!-- Three.js core FIRST -->
+<!-- Three.js (must be BEFORE loaders) -->
 <script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
-<!-- Loaders AFTER core -->
+<!-- GLTF + DRACO loaders (global THREE.* style for non-module builds) -->
 <script src="https://unpkg.com/three@0.154.0/examples/js/loaders/DRACOLoader.js"></script>
 <script src="https://unpkg.com/three@0.154.0/examples/js/loaders/GLTFLoader.js"></script>
-
 </head>
 <body>
 
@@ -268,9 +267,9 @@
   </div>
 </div>
 
-<!-- Tell the app to load the local GLB -->
+<!-- Absolute URL for your GLB (works on GitHub Pages) -->
 <script>
-  window.KNIFE_URL = './karambit_prime_valorant.glb';
+  window.KNIFE_URL = 'https://completrz.github.io/F1-Snake2.0/karambit_prime_valorant.glb';
 </script>
 
 <script>
@@ -286,7 +285,6 @@
   };
   firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
-  // Ensure the session persists between rounds
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(console.error);
   const db = firebase.firestore();
 
@@ -339,8 +337,8 @@
   const xpTime = document.getElementById('xpTime');
 
   /* ========= State ========= */
-  let user = null;                  // Firebase user
-  let playerDoc = null;             // players/{uid} data cache
+  let user = null;
+  let playerDoc = null;
   let equipped = { body:null, trail:null, knife:null };
   let currentMode = 'classic';
 
@@ -349,28 +347,23 @@
   let gameStartMs = 0;
   let spawnGraceUntil = 0;
 
-  // Rank snapshot for RR delta calculation
   let prevRankIndex = 0;
   let prevRR = 0;
 
-  // XP Multiplier
   let xpMultActive = false;
   let xpMultUntil = 0;
   const XP_DURATION_MS = 15000;
 
-  // Coins
   const COINS_PER_POINT = 1;
 
-  // Leaderboard view
-  let lbView = 'live'; // 'live' or 'all'
+  let lbView = 'live';
   let lbUnsub = null;
 
   /* ========= Auth & Lobby ========= */
   googleBtn.addEventListener('click', async ()=>{
     const provider = new firebase.auth.GoogleAuthProvider();
-    try{
-      await auth.signInWithPopup(provider);
-    }catch(e){ console.error(e); alert('Sign-in failed: ' + e.message); }
+    try{ await auth.signInWithPopup(provider); }
+    catch(e){ console.error(e); alert('Sign-in failed: ' + e.message); }
   });
 
   auth.onAuthStateChanged(async (u)=>{
@@ -382,7 +375,6 @@
       return;
     }
     googleBtn.style.display = 'none';
-    // Ensure player doc
     const ref = db.collection('players').doc(user.uid);
     const snap = await ref.get();
     if (!snap.exists){
@@ -402,7 +394,6 @@
     coinsBadge.style.display = 'inline-flex';
     lobbyOverlay.style.display = 'grid';
 
-    // start leaderboard in lobby
     setLeaderboardView(lbView);
   });
 
@@ -420,8 +411,6 @@
     }catch(e){ console.error(e); }
 
     await primeRankSnapshotAndHUD();
-
-    // start game
     startGame();
   });
 
@@ -459,8 +448,8 @@
       coinsText.textContent = playerDoc.coins || 0;
       shopCoinsText.textContent = playerDoc.coins || 0;
       setCarColor(rankColor(playerDoc.rankIndex||0));
-      // FIX: apply current tint to knife
-      applyKnifeTint(currentRankColor);
+      // NEW: tint knife to current rank color (if loaded)
+      applyKnifeTint(rankColor(playerDoc.rankIndex||0));
     }
   }
 
@@ -468,14 +457,12 @@
     shopGrid.innerHTML = '';
     shopCoinsText.textContent = playerDoc?.coins ?? 0;
 
-    // Try Firestore shop
     let items = [];
     try{
       const q = await db.collection('shop').where('active','==',true).get();
       q.forEach(doc=> items.push({id:doc.id, ...doc.data()}));
     }catch(e){ console.warn('Shop load failed, using fallback', e); }
 
-    // Fallback if none
     if (!items.length){
       items = [
         {id:'paint_purple', name:'Purple Body', type:'body', price:200, rarity:'rare', icon:'🎨', color:'#8a5cff', active:true},
@@ -486,17 +473,14 @@
       ];
     }
 
-    // Filter
     if (filterType !== 'all') items = items.filter(it=> (it.type===filterType));
 
-    // Load inventory ownership
     const inv = new Set();
     if (user){
       const invSnap = await db.collection('players').doc(user.uid).collection('inventory').get();
       invSnap.forEach(d=> inv.add(d.id));
     }
 
-    // Render
     for (const it of items){
       const card = document.createElement('div'); card.className = 'shopCard';
       const top = document.createElement('div'); top.className='shopTop';
@@ -532,7 +516,7 @@
         const invRef = pRef.collection('inventory').doc(item.id);
         const [pSnap, invSnap] = await Promise.all([tx.get(pRef), tx.get(invRef)]);
         const pdata = pSnap.data() || {};
-        if (invSnap.exists) return; // already owned
+        if (invSnap.exists) return;
         const coins = pdata.coins || 0;
         const price = item.price || 0;
         if (coins < price) throw new Error('Not enough coins');
@@ -540,13 +524,13 @@
         tx.set(invRef, { owned:true, acquiredAt: firebase.firestore.FieldValue.serverTimestamp(), item:{name:item.name, type:item.type} });
       });
       await refreshPlayer();
-      await refreshShop(); // re-render
+      await refreshShop();
     }catch(e){ alert(e.message); }
   }
 
   async function equipItem(item){
     if (!user) return;
-    const key = item.type; // body | trail | knife | boost
+    const key = item.type;
     if (!key) return;
     try{
       await db.collection('players').doc(user.uid).set({
@@ -555,7 +539,6 @@
       playerDoc.equipped = { ...(playerDoc.equipped||{}), [key]: item.id };
       equipped = playerDoc.equipped;
       if (item.type==='body' && item.color){
-        // immediately tint car
         setBodyPaintColor(item.color);
       }
       alert('Equipped!');
@@ -613,7 +596,7 @@
     if (!user) return;
     const now = performance.now();
     if (!writeLiveScoreThrottled._next || now >= writeLiveScoreThrottled._next){
-      writeLiveScoreThrottled._next = now + 2000; // every 2s
+      writeLiveScoreThrottled._next = now + 2000;
       try{
         await db.collection('leaderboard').doc(user.uid).set({
           name: playerDoc?.name || 'Player',
@@ -1044,7 +1027,6 @@
   window.addEventListener('keydown', e=> keys[e.key.toLowerCase()] = true);
   window.addEventListener('keyup',   e=> keys[e.key.toLowerCase()] = false);
 
-  // Guard so game touch handlers don't swallow UI clicks/taps
   function isUIEventTarget(el){
     return !!(el && el.closest(
       'button, input, select, textarea, a,' +
@@ -1106,7 +1088,6 @@
     spinDur: 1200
   };
 
-  // Model cache so we only load once
   let _knifeGLTF = null;
   const KNIFE_URL = (window.KNIFE_URL || './karambit_prime_valorant.glb');
 
@@ -1136,14 +1117,11 @@
     }
 
     const loader = new THREE.GLTFLoader();
-
-    // If your GLB is Draco-compressed, this will decode it (harmless if not).
     const draco = new THREE.DRACOLoader();
     draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
     loader.setDRACOLoader(draco);
 
     const useModel = (gltf)=>{
-      // Clone to avoid mutating cached scene
       const m = gltf.scene.clone(true);
       m.traverse(o=>{
         if (o.isMesh){
@@ -1153,10 +1131,7 @@
         }
       });
 
-      // Adjust size/orientation if needed
       m.scale.set(0.95, 0.95, 0.95);
-      // m.rotation.y += Math.PI; // uncomment if facing wrong way
-
       camera.add(m);
       knife.group = m;
       knife.group.position.copy(knife.basePos);
@@ -1167,19 +1142,20 @@
     };
 
     if (_knifeGLTF){
+      console.log('Reusing cached knife GLTF');
       useModel(_knifeGLTF);
       return;
     }
 
+    console.log('KNIFE_URL =', KNIFE_URL);
     loader.load(
       KNIFE_URL,
-      (gltf)=>{ _knifeGLTF = gltf; useModel(gltf); },
-      undefined,
+      (gltf)=>{ console.log('knife loaded'); _knifeGLTF = gltf; useModel(gltf); },
+      (xhr)=>{ console.log('knife progress', (xhr.total ? (xhr.loaded/xhr.total*100).toFixed(0) : '?') + '%'); },
       (err)=>{ console.error('Knife model load failed:', err); }
     );
   }
 
-  // Keep the same “inspect spin” on F
   function startSpin(){
     if (!knife.group || knife.spin) return;
     knife.spin = true;
@@ -1187,13 +1163,11 @@
   }
   window.addEventListener('keydown', (e)=>{ if (e.key.toLowerCase() === 'f') startSpin(); });
 
-  // Idle bob + inspect spin (called from animate())
   function updateKnife(){
     if (!knife.group) return;
     const now = performance.now();
     const t = now * 0.001;
 
-    // Idle sway
     const swayX = Math.sin(t * 2.0) * 0.01;
     const swayY = Math.cos(t * 1.7) * 0.008;
 
@@ -1208,7 +1182,6 @@
       knife.baseRot.z + swayX*0.8
     );
 
-    // Inspect spin
     if (knife.spin){
       const p = Math.min(1, (now - knife.spinStart) / knife.spinDur);
       const ease = p<0.5 ? 2*p*p : 1 - Math.pow(-2*p+2,2)/2;
@@ -1258,7 +1231,6 @@
     const t = (now - sessionStart)/1000;
     const player = cars[0];
 
-    // XP badge visibility
     if (xpMultActive && now < xpMultUntil){
       xpBadge.style.display = 'flex';
       const rem = (xpMultUntil - now)/1000;
@@ -1267,10 +1239,8 @@
       xpMultActive = false; xpBadge.style.display = 'none';
     }
 
-    // Maintain up to 2 gems
     maintainGems();
 
-    // Speed scales with score
     const BASE_MIN   = isMobile ? 7 : 13;
     const BASE_MAX   = isMobile ? 26 : 42;
     const PER_POINT  = isMobile ? 0.35 : 0.6;
@@ -1292,7 +1262,6 @@
       const fwd = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
       player.position.add(fwd.multiplyScalar(speed * dt));
 
-      // followers
       for (let i=1;i<cars.length;i++){
         const lead = cars[i-1], foll = cars[i];
         const dir = new THREE.Vector3().subVectors(lead.position, foll.position);
@@ -1305,26 +1274,22 @@
         foll.rotationY += (targetRot - foll.rotationY) * 0.15;
       }
 
-      // apply transforms
       for (let i=0;i<cars.length;i++){
         const c = cars[i];
         c.mesh.position.copy(c.position).setY(0);
         c.mesh.rotation.y = c.rotationY;
       }
 
-      // animate pickups
       for (const p of pickups){
         const y = p.baseY + Math.sin(t*2 + p.phase)*0.3 + 0.8;
         p.mesh.position.y = y;
         p.mesh.rotation.y += 0.02;
       }
-      // animate gems
       for (const g of xpGems){
         g.mesh.position.y = 0.9 + Math.sin(t*2.4 + g.phase)*0.35;
         g.mesh.rotation.y += 0.03;
       }
 
-      // collect pickups
       for (let i=pickups.length-1; i>=0; i--){
         if (pickups[i].mesh.position.distanceTo(player.position) < 3){
           scene.remove(pickups[i].mesh); pickups.splice(i,1);
@@ -1334,7 +1299,6 @@
           writeLiveScoreThrottled();
         }
       }
-      // collect gems
       for (let i=xpGems.length-1; i>=0; i--){
         if (xpGems[i].mesh.position.distanceTo(player.position) < 3.2){
           scene.remove(xpGems[i].mesh); xpGems.splice(i,1);
@@ -1342,7 +1306,6 @@
         }
       }
 
-      // moving barriers start after score >= 8
       const moveFactor = Math.min(1, Math.max(0, (score - 8) / 12));
       if (moveFactor > 0){
         for (const o of obstacles){
@@ -1361,7 +1324,6 @@
         for (const o of obstacles){ o.mesh.position.copy(o.base); }
       }
 
-      // collisions & wall
       if (canDie()){
         for (const o of obstacles){
           if (o.mesh.position.distanceTo(player.position) < 4.0){ doGameOver(); break; }
@@ -1372,7 +1334,6 @@
 
     updateKnife();
 
-    // camera follow
     const camOffset = new THREE.Vector3(0, 15, -30).applyAxisAngle(new THREE.Vector3(0,1,0), player.rotationY);
     camera.position.copy(player.position.clone().add(camOffset));
     camera.lookAt(player.position);
@@ -1431,7 +1392,6 @@
     if (idx === 0 && rr < 0) rr = 0;
     if (idx === RADIANT_INDEX && rr > 100) rr = 100;
 
-    // coins
     const coinsEarned = scoreVal * COINS_PER_POINT;
     await ref.set({
       rankIndex: idx, rr, coins: (data.coins||0) + coinsEarned,
@@ -1541,7 +1501,6 @@
     finalScoreEl.textContent = score;
     restartOverlay.style.display = 'grid';
 
-    // refresh coin badges
     refreshPlayer().catch(()=>{});
   }
 
